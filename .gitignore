@@ -1,0 +1,23 @@
+# Agent scratch: asar extraction, jira dumps, patch workspace, throwaway scripts
+.agent/
+
+# Local refactor backups — git history supersedes these
+.refactor-backup/
+
+# Unrelated research deliverables (A-share screening docs)
+# Remove this line if you want them versioned.
+deliverables/
+
+# Python bytecode (from .agent/scripts)
+__pycache__/
+*.py[cod]
+
+# Logs
+*.log
+
+# Node
+node_modules/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db

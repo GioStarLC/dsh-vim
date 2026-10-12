@@ -1,0 +1,9 @@
+# Development overlay for checking this plugin without installing it into a
+# profile. It points the Loader straight at the source entry, so it validates
+# patch syntax and module resolution only — the browser face still needs a
+# real profile installation.
+#
+#   dsh --profile desktop --patch "G:/桌面/dsh-vim/tools/probe.patch.yml" --dump-config
+- insert:
+    - id: dsh-vim-probe
+      name: 'G:/桌面/dsh-vim/lib/index.js'
