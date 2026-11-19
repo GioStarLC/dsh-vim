@@ -460,7 +460,10 @@ function resetHitTest() {
 globalThis.window = fakeWindow
 globalThis.document = fakeDocument
 globalThis.getComputedStyle = (node) => ({
-  overflowY: node.__overflowY,
+  // An inline style is what the browser reports first: the windows this plugin
+  // mounts style themselves, and a check that reads a column's scrollability is
+  // reading exactly that declaration.
+  overflowY: (node.style && node.style.overflowY) || node.__overflowY,
   scrollBehavior: node.__scrollBehavior,
 })
 
@@ -1103,6 +1106,7 @@ const SHIPPED = {
   effortKey: 'q',
   modelKey: 'w',
   modelLevelKey: 'Tab',
+  boardKey: 'j',
   paletteKey: 'f',
   paletteRenameKey: 'r',
   paletteUpKey: 'e',
@@ -1997,10 +2001,12 @@ check('locale dictionaries are registered for the plugin namespace', () => {
 })
 
 check('rebinding takes effect immediately', () => {
-  const applied = fakeWindow.__dshVim.update({ downKey: 'j' })
-  assert.equal(applied.downKey, 'j')
+  // `k`, not `j`: `j` is the board's shipped key and the two seats are live at
+  // the same time, so taking it here is a conflict rather than a rebind.
+  const applied = fakeWindow.__dshVim.update({ downKey: 'k' })
+  assert.equal(applied.downKey, 'k')
   transcript.scrollTop = 0
-  tap('j')
+  tap('k')
   clock.advance(500)
   assert.equal(transcript.scrollTop, 140, 'the new key must scroll')
   transcript.scrollTop = 0
@@ -2011,11 +2017,11 @@ check('rebinding takes effect immediately', () => {
 })
 
 check('a conflicting rebind is rejected and changes nothing', () => {
-  fakeWindow.__dshVim.update({ downKey: 'j' })
-  const rejected = fakeWindow.__dshVim.update({ upKey: 'j' })
+  fakeWindow.__dshVim.update({ downKey: 'k' })
+  const rejected = fakeWindow.__dshVim.update({ upKey: 'k' })
   assert.equal(rejected.error, 'conflict')
   assert.equal(fakeWindow.__dshVim.settings().upKey, 'e', 'the old binding must survive')
-  assert.equal(fakeWindow.__dshVim.settings().downKey, 'j')
+  assert.equal(fakeWindow.__dshVim.settings().downKey, 'k')
   fakeWindow.__dshVim.update({ downKey: 'd' })
 })
 
@@ -6134,6 +6140,161 @@ await checkAsync('the settings page reads the catalog instead of asking for an i
   assert.equal(MODEL.catalogReads, before + 1, 'the group must read the catalog off the host, once')
 })
 
+// --- the board --------------------------------------------------------------
+
+/**
+ * A timestamp inside today, a given number of hours after the local midnight.
+ *
+ * The inbox cuts at the local midnight, so a check about "today" cannot be
+ * written with `ago()`: three hours before a run at 01:00 is yesterday's
+ * evening, and the same check would pass in the afternoon and fail at night.
+ * @param {number} hours - hours after midnight, may be 0.
+ * @returns {number} epoch milliseconds.
+ */
+function todayAt(hours) {
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  return midnight.getTime() + hours * HOUR
+}
+
+/** The mounted board's panel, or null when no board is up. */
+function boardPanel() {
+  const host = body.children[body.children.length - 1]
+  return host && host.children[0] ? host.children[0] : null
+}
+
+/** The board's column strip, or null when no board is up. */
+function boardBody() {
+  const panel = boardPanel()
+  return panel ? panel.children[1] ?? null : null
+}
+
+/** The board's columns, in draw order: the inbox first, then the lists. */
+function boardColumns() {
+  return boardBody() ? boardBody().children : []
+}
+
+/** The cards inside one column, in order. */
+function cardsIn(column) {
+  const list = column && column.children[1]
+  if (!list) return []
+  return list.children.filter((node) => node.__attrs['data-session-id'] !== undefined)
+}
+
+/** Every conversation on the board, column by column. */
+function boardCardIds() {
+  return boardColumns().flatMap((column) => cardsIn(column).map((card) => card.__attrs['data-session-id']))
+}
+
+/** The board's heading line, as `{title, count}`. */
+function boardHeading() {
+  const head = boardPanel().children[0]
+  return { title: String(head.children[0].textContent), count: String(head.children[1].textContent) }
+}
+
+/** Press a card, the way a reader does. */
+function clickBoardCard(card) {
+  fireOn(card, 'click', { type: 'click' })
+}
+
+check('j opens the board on what moved today', () => {
+  seed([
+    { id: 'early', displayTitle: 'earlier today', updatedAt: todayAt(0) },
+    { id: 'late', displayTitle: 'later today', updatedAt: todayAt(5) },
+    { id: 'yesterday', displayTitle: 'yesterday', updatedAt: todayAt(0) - 1 },
+  ])
+  const swallowed = tap('j')
+  assert.ok(swallowed, 'the board key must be the plugin\'s, not a stray letter')
+  const state = fakeWindow.__dshVim.board()
+  assert.equal(state.open, true, 'j must open the board')
+  assert.deepEqual(state.inbox.map((row) => row.id), ['late', 'early'], 'the inbox is today, newest first')
+  assert.deepEqual(
+    state.columns,
+    [
+      expectedLabel('boardInbox'),
+      expectedLabel('boardSeedDraft'),
+      expectedLabel('boardSeedHld'),
+      expectedLabel('boardSeedCode'),
+    ],
+    'the inbox leads, then the three lists the board starts with'
+  )
+  assert.deepEqual(
+    boardColumns().map((column) => String(column.children[0].children[0].textContent)),
+    state.columns,
+    'the headings say what the API says'
+  )
+  assert.deepEqual(boardCardIds(), ['late', 'early'], 'and only today\'s conversations are on it')
+  assert.deepEqual(boardHeading(), {
+    title: expectedLabel('board'),
+    count: expectedLabel('boardTodayCount') + '2' + expectedLabel('boardCountUnit'),
+  })
+  tap('Escape')
+})
+
+check('a card is the way into its conversation, and it puts the board away', () => {
+  seed([{ id: 'task', displayTitle: 'a task', updatedAt: todayAt(1) }])
+  tap('j')
+  const card = cardsIn(boardColumns()[0])[0]
+  assert.ok(card, 'the inbox must show the conversation')
+  assert.equal(String(card.children[0].textContent), 'a task', 'the card leads with the conversation\'s name')
+  clickBoardCard(card)
+  assert.deepEqual(opened.slice(-1), ['task'], 'a press on a card opens that conversation')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'and the board gets out of the way')
+})
+
+check('escape closes the board, the key itself too, and so does a press beside it', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
+  assert.ok(tap('Escape'), 'escape belongs to the board while it is up')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'escape closes it')
+  tap('j')
+  tap('j')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'the key that opened it puts it away again')
+  tap('j')
+  press(body)
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'a press on the page beside it closes it')
+})
+
+check('the board owns the keyboard while it is up', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
+  tap('f')
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'the task window must not open behind the board')
+  tap('w')
+  assert.equal(fakeWindow.__dshVim.modelPick().open, false, 'nor the model window')
+  tap(' ')
+  assert.notEqual(fakeDocument.activeElement, editor, 'the focus key must not put the caret in the box')
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'and the board stays up through all of it')
+  tap('Escape')
+})
+
+check('the task window does not give way to the board', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('f')
+  assert.equal(fakeWindow.__dshVim.palette().open, true)
+  tap('j')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'one overlay at a time: the board stays shut')
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'and the task window keeps the page')
+  tap('Escape')
+})
+
+check('a scroll key reads the column under the pointer', () => {
+  seed(Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, displayTitle: `c${i}`, updatedAt: todayAt(i) })))
+  tap('j')
+  const list = boardColumns()[0].children[1]
+  // What a browser would report for a column with more in it than it shows.
+  list.scrollHeight = 1200
+  list.clientHeight = 400
+  movePointer(600, 300)
+  aimAt(list)
+  tap('d')
+  clock.advance(500)
+  assert.equal(list.scrollTop, 140, 'the column under the pointer is what scrolls')
+  assert.equal(transcript.scrollTop, 0, 'and the conversation behind the board is left alone')
+  resetHitTest()
+  tap('Escape')
+})
+
 // --- lifecycle --------------------------------------------------------------
 
 check('the popup honours the configured size, spacing and position', () => {
@@ -6224,6 +6385,7 @@ check('the settings page exposes every binding, plus font size and position', ()
       [expectedLabel('effort')]: 'q',
       [expectedLabel('model')]: 'w',
       [expectedLabel('modelLevel')]: 'Tab',
+      [expectedLabel('board')]: 'j',
       [expectedLabel('palette')]: 'f',
       [expectedLabel('paletteRename')]: 'r',
       [expectedLabel('paletteUp')]: 'e',
@@ -6232,7 +6394,7 @@ check('the settings page exposes every binding, plus font size and position', ()
       [expectedLabel('paletteStage')]: 's',
       [expectedLabel('paletteArchive')]: 'g',
     },
-    'all thirteen rebindable keys must be on the page'
+    'all fourteen rebindable keys must be on the page'
   )
   // A space is invisible in a box of its own, so the page spells it out.
   const focusBox = elements.find((e) => e.props['aria-label'] === expectedLabel('focusComposer'))
@@ -6286,10 +6448,26 @@ check('a key row on the settings page rebinds the plugin', () => {
     (e) => e.props.label === expectedLabel('palette') && e.props.recordingText
   )
   assert.ok(row, 'the task-window key must be bindable from the page')
-  row.props.onSet('j')
-  assert.equal(fakeWindow.__dshVim.settings().paletteKey, 'j', 'pressing a key in the page must take effect at once')
+  // A letter neither window owns: the two overlays refuse to share one, which
+  // is checked on its own below.
+  row.props.onSet('x')
+  assert.equal(fakeWindow.__dshVim.settings().paletteKey, 'x', 'pressing a key in the page must take effect at once')
   row.props.onSet('f')
   assert.equal(fakeWindow.__dshVim.settings().paletteKey, 'f')
+})
+
+check('the two overlay keys refuse to share one letter', () => {
+  // The board's key is live on the page and the task window's key opens the
+  // other overlay: one press cannot mean both, and the two seats sit in
+  // different groups, so the group checks alone would let them collide.
+  const rejected = fakeWindow.__dshVim.update({ paletteKey: 'j' })
+  assert.equal(rejected.error, 'conflict', 'the board key must not be taken by the task window')
+  assert.equal(fakeWindow.__dshVim.settings().paletteKey, 'f')
+  assert.equal(fakeWindow.__dshVim.update({ boardKey: 'f' }).error, 'conflict', 'nor the other way round')
+  assert.equal(fakeWindow.__dshVim.settings().boardKey, 'j')
+  // A page key it may share with anything in the other group, as before.
+  assert.ok(!fakeWindow.__dshVim.update({ boardKey: 'g' }).error, 'the archive key may collide with it')
+  fakeWindow.__dshVim.update({ boardKey: 'j' })
 })
 
 check('a position choice on the settings page applies immediately', () => {
