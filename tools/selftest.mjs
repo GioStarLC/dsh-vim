@@ -6161,10 +6161,24 @@ function todayAt(hours) {
   return midnight.getTime() + hours * HOUR
 }
 
-/** The mounted board's panel, or null when no board is up. */
+/**
+ * The mounted board's panel, or null when no board is up.
+ *
+ * Found by the label it publishes rather than by being the last thing on the
+ * page: a notice (the one a refused action speaks through) is appended to the
+ * body too, and it can sit above the board.
+ * @returns {object|null} the panel.
+ */
 function boardPanel() {
-  const host = body.children[body.children.length - 1]
-  return host && host.children[0] ? host.children[0] : null
+  for (let i = body.children.length - 1; i >= 0; i--) {
+    const host = body.children[i]
+    const panel = host.children && host.children[0]
+    if (!panel || !panel.__attrs) continue
+    if (panel.__attrs['aria-label'] !== expectedLabel('board')) continue
+    if (panel.__attrs['role'] !== 'dialog') continue
+    return panel
+  }
+  return null
 }
 
 /** The board's column strip, or null when no board is up. */
@@ -6173,9 +6187,16 @@ function boardBody() {
   return panel ? panel.children[1] ?? null : null
 }
 
-/** The board's columns, in draw order: the inbox first, then the lists. */
+/**
+ * The board's columns, in draw order: the inbox first, then the lists.
+ *
+ * The trailing "add a column" seat is drawn in the same row and is not a
+ * column: it holds nothing and stands for nothing that can hold anything.
+ * @returns {Array<object>} the column elements.
+ */
 function boardColumns() {
-  return boardBody() ? boardBody().children : []
+  if (!boardBody()) return []
+  return boardBody().children.filter((node) => node.__attrs['data-role'] !== 'addColumn')
 }
 
 /** The cards inside one column, in order. */
@@ -6362,6 +6383,71 @@ check('escape during a drag puts the card back and leaves the board open', () =>
     'and the card never left the inbox'
   )
   assert.deepEqual(fakeWindow.__dshVim.board().filed[1].ids, [], 'nothing was filed')
+  resetHitTest()
+  tap('Escape')
+})
+
+check('a new column is added and named where it stands', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
+  const add = boardBody().children.find((node) => node.__attrs['data-role'] === 'addColumn')
+  assert.ok(add, 'the row must offer a seat for a new column')
+  fireOn(add, 'click', { type: 'click' })
+  const titles = fakeWindow.__dshVim.board().filed.map((column) => column.title)
+  assert.equal(titles.length, 4, 'the column is there at once')
+  const box = boardColumns()[4].children[0].children.find((cell) => cell.__attrs['data-role'] === 'columnNameBox')
+  assert.ok(box, 'and it opens named, ready to be typed over')
+  typeIn(box, '我的列')
+  pressIn(box, 'Enter')
+  assert.equal(fakeWindow.__dshVim.board().filed[3].title, '我的列', 'Enter keeps the name')
+  tap('Escape')
+})
+
+check('a column that still holds something refuses to be removed', () => {
+  seed([{ id: 'held', displayTitle: 'held', updatedAt: todayAt(1) }])
+  tap('j')
+  // File the card into the first list, then try to remove that list.
+  fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(boardColumns()[1].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+  fire('pointerup', { type: 'pointerup' })
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['held'])
+  const remove = boardColumns()[1].children[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'columnRemove'
+  )
+  assert.ok(remove, 'every list can be removed')
+  fireOn(remove, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 3, 'a column holding cards stays')
+  // The empty one beside it goes.
+  const spare = boardColumns()[2].children[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'columnRemove'
+  )
+  fireOn(spare, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 2, 'an empty one does not')
+  resetHitTest()
+  tap('Escape')
+})
+
+check('dragging a heading moves the column along the row', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
+  const before = fakeWindow.__dshVim.board().filed.map((column) => column.title)
+  fireOn(boardColumns()[1].children[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(boardColumns()[3].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 700, clientY: 1000 })
+  fire('pointerup', { type: 'pointerup' })
+  const after = fakeWindow.__dshVim.board().filed.map((column) => column.title)
+  assert.deepEqual(after, [before[1], before[2], before[0]], 'the dragged column lands after its neighbour')
   resetHitTest()
   tap('Escape')
 })
