@@ -6199,11 +6199,25 @@ function boardColumns() {
   return boardBody().children.filter((node) => node.__attrs['data-role'] !== 'addColumn')
 }
 
-/** The cards inside one column, in order. */
+/**
+ * The cards inside one column, in order.
+ *
+ * They sit in folder blocks rather than directly in the column's scroller, so
+ * this walks down instead of reading one level: a check about "the cards" means
+ * the conversations, whatever the board has grouped them into.
+ * @param {object} column - the column element.
+ * @returns {Array<object>} the card elements.
+ */
 function cardsIn(column) {
-  const list = column && column.children[1]
-  if (!list) return []
-  return list.children.filter((node) => node.__attrs['data-session-id'] !== undefined)
+  const out = []
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (child.__attrs['data-session-id'] !== undefined) out.push(child)
+      else walk(child)
+    }
+  }
+  if (column && column.children[1]) walk(column.children[1])
+  return out
 }
 
 /** Every conversation on the board, column by column. */
@@ -6448,6 +6462,85 @@ check('dragging a heading moves the column along the row', () => {
   fire('pointerup', { type: 'pointerup' })
   const after = fakeWindow.__dshVim.board().filed.map((column) => column.title)
   assert.deepEqual(after, [before[1], before[2], before[0]], 'the dragged column lands after its neighbour')
+  resetHitTest()
+  tap('Escape')
+})
+
+check('a card taken off the board stays off until it is used again', () => {
+  seed([{ id: 'gone', displayTitle: 'gone', updatedAt: todayAt(1) }])
+  tap('j')
+  const cross = cardsIn(boardColumns()[0])[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'cardRemove'
+  )
+  assert.ok(cross, 'every card can be taken off the board')
+  fireOn(cross, 'click', { type: 'click', stopPropagation() {} })
+  assert.deepEqual(fakeWindow.__dshVim.board().inbox, [], 'it is off the board')
+  // The feed republishes the same conversation: still off.
+  seed([{ id: 'gone', displayTitle: 'gone', updatedAt: todayAt(1) }])
+  assert.deepEqual(fakeWindow.__dshVim.board().inbox, [], 'and it stays off while nothing happens in it')
+  // Then it is used again, which is the one thing that brings it back.
+  seed([{ id: 'gone', displayTitle: 'gone', updatedAt: todayAt(3) }])
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['gone'],
+    'a conversation used again comes back to the inbox'
+  )
+  tap('Escape')
+})
+
+check('each column groups its conversations under the folder they live in', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'dsh-vim', path: 'G:\\work\\vim', sessionIds: ['v1', 'v2'] },
+    { workspaceId: 'w2', title: 'web', path: 'G:\\work\\web', sessionIds: ['w1'] },
+  ])
+  seed([
+    { id: 'v1', displayTitle: 'first vim', updatedAt: todayAt(3) },
+    { id: 'w1', displayTitle: 'a web one', updatedAt: todayAt(2) },
+    { id: 'v2', displayTitle: 'second vim', updatedAt: todayAt(1) },
+  ])
+  tap('j')
+  const heads = boardColumns()[0]
+    .children[1].children.map((block) => block.children[0])
+    .filter((head) => head.__attrs['data-role'] === 'folderHead')
+    .map((head) => String(head.children[1].textContent))
+  assert.deepEqual(heads, ['dsh-vim', 'web'], 'a folder is drawn once, above its conversations')
+  const vimBlock = boardColumns()[0].children[1].children[0]
+  assert.deepEqual(
+    cardsIn({ children: ['', vimBlock] }).map((card) => card.__attrs['data-session-id']),
+    ['v1', 'v2'],
+    'and its conversations sit under it, in the order the board keeps them'
+  )
+  // Folding it away is one press, and it stays folded for the next repaint.
+  fireOn(vimBlock.children[0], 'click', { type: 'click' })
+  assert.equal(
+    boardColumns()[0].children[1].children[0].children.length,
+    1,
+    'a folder that is folded away is its heading alone'
+  )
+  tap('Escape')
+})
+
+check('a column keeps the order it was given', () => {
+  seed([
+    { id: 'first', displayTitle: 'first', updatedAt: todayAt(1) },
+    { id: 'second', displayTitle: 'second', updatedAt: todayAt(2) },
+  ])
+  tap('j')
+  // File both into the first list, one after the other.
+  for (const id of ['first', 'second']) {
+    const card = cardsIn(boardColumns()[0]).find((node) => node.__attrs['data-session-id'] === id)
+    fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 10 })
+    aimAt(boardColumns()[1].children[1])
+    fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+    fire('pointerup', { type: 'pointerup' })
+  }
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['first', 'second'], 'filed in the order given')
+  // Recency moves; the shelf does not.
+  seed([
+    { id: 'first', displayTitle: 'first', updatedAt: todayAt(6) },
+    { id: 'second', displayTitle: 'second', updatedAt: todayAt(5) },
+  ])
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['first', 'second'], 'and it stays that way')
   resetHitTest()
   tap('Escape')
 })
