@@ -1073,6 +1073,11 @@ function blurWindow() {
   for (const l of listeners.slice()) if (l.type === 'blur') l.fn({})
 }
 
+/** The page getting the front back, as the browser reports it. */
+function refocusWindow() {
+  for (const l of listeners.slice()) if (l.type === 'focus') l.fn({})
+}
+
 /** Press and release without waiting for auto-repeat. */
 function tap(key, opts) {
   const prevented = keydown(key, opts)
@@ -2154,12 +2159,71 @@ function headerCount() {
   return host.children[0].children[0].children[1].textContent
 }
 
-/** The mounted window's list rows, in order. */
-function rowNodes() {
+/** Everything the mounted window's list holds, rows and block headings alike. */
+function listNodes() {
   const host = body.children[body.children.length - 1]
   if (!host || !host.children[0]) return []
   const list = host.children[0].children[1]
   return list ? list.children : []
+}
+
+/**
+ * The mounted window's conversation rows, in order.
+ *
+ * Block headings sit between the rows they label, so they are filtered out
+ * here: every check about "the rows" means the conversations, and the
+ * selection counts conversations too. A row is told apart from a heading by
+ * carrying the session id it stands for — a heading stands for no session.
+ */
+function rowNodes() {
+  return listNodes().filter((node) => node.__attrs['data-session-id'] !== undefined)
+}
+
+/**
+ * The block headings of the mounted window, in order, as `{name, count}`.
+ * `count` is the "More" seat's readout, or null on a folder heading.
+ */
+function sectionHeaders() {
+  return listNodes()
+    .filter((node) => node.__attrs['data-session-id'] === undefined)
+    .map((node) => ({
+      name: node.children[0] ? String(node.children[0].textContent) : '',
+      count: node.children[1] ? String(node.children[1].textContent) : null,
+    }))
+}
+
+/** The heading texts of the mounted window, in order. */
+function sectionNames() {
+  return sectionHeaders().map((header) => header.name)
+}
+
+/**
+ * The mounted window's "More" heading element, or null when there is none.
+ *
+ * `sectionHeaders` reads the headings without handing back the node, and a
+ * check that presses one needs the node itself.
+ * @returns {object|null} the heading.
+ */
+function moreHeadingNode() {
+  const label = expectedLabel('groupMore')
+  return (
+    listNodes().find(
+      (node) => node.__attrs['data-session-id'] === undefined && String(node.children[0] ? node.children[0].textContent : '') === label
+    ) ?? null
+  )
+}
+
+/**
+ * Press the "More" seat, the way a reader does.
+ *
+ * The seat answers to a press on the heading itself, not to a key, so every
+ * check that wants a deeper list asks for it here rather than reaching for one.
+ * @returns {void}
+ */
+function clickMore() {
+  const heading = moreHeadingNode()
+  assert.ok(heading, 'the window must be showing a More seat for this check to press it')
+  fireOn(heading, 'mousedown', { type: 'mousedown', preventDefault() {}, stopPropagation() {} })
 }
 
 // The violet the plugin paints the "you are here" chip with. A status chip and
@@ -2243,11 +2307,33 @@ function markedStage(row) {
 }
 
 /**
- * The tracks to the right of the name column, in order.
+ * The folder prefix inside one row's name cell, or null when the row carries none.
  *
- * Splitting the whole template on spaces does not work: `minmax(0, 1fr)` and a
- * capped folder track carry one too. Everything after the name track is a plain
- * `<n>px` track, so cutting there gives the right-hand columns exactly.
+ * It rides inside the name cell rather than beside it, so it is found among that
+ * cell's children and not among the row's — which is also the cheapest way to
+ * assert it is not a column: a cell of the row would show up in `row.children`.
+ * @param {object} row - a rendered row.
+ * @returns {object|null} the prefix span.
+ */
+function folderPrefix(row) {
+  const name = row.children[0]
+  if (!name || !name.children) return null
+  return name.children.find((child) => child.getAttribute('data-role') === 'folder') ?? null
+}
+
+/** The conversation name of one row, with any folder prefix excluded. */
+function nameText(row) {
+  const name = row.children[0]
+  if (!name || !name.children) return String((name && name.textContent) || '')
+  const text = name.children.find((child) => child.getAttribute('data-role') === 'nameText')
+  return text ? String(text.textContent) : String(name.textContent)
+}
+
+/** The tracks to the right of the name column, in order.
+ *
+ * Splitting the whole template on spaces does not work: `minmax(0, 1fr)` carries
+ * a space inside it. Everything after the name track is a plain `<n>px` track, so
+ * cutting there gives the right-hand columns exactly.
  * @param {object} row - a rendered row.
  * @returns {Array<string>} the track values.
  */
@@ -2256,6 +2342,12 @@ function rightTracks(row) {
   const NAME_TRACK = ' minmax(0, 1fr) '
   const at = template.indexOf(NAME_TRACK)
   return template.slice(at + NAME_TRACK.length).trim().split(' ')
+}
+
+/** The state gutter: the one track in front of the name. */
+function statusTrack(row) {
+  const template = String(row.style.gridTemplateColumns)
+  return template.slice(0, template.indexOf(' minmax(0, 1fr) ')).trim()
 }
 
 /** The open name box, or null when no row is being renamed. */
@@ -2464,12 +2556,12 @@ check('empty provisional slots are not offered', () => {
   tap('Escape')
 })
 
-check('the window opens on the last 12 hours only', () => {
+check('the window opens on the last three hours only', () => {
   seed([
-    { id: 'fresh1', displayTitle: 'fresh 1', updatedAt: ago(1) },
-    { id: 'fresh2', displayTitle: 'fresh 2', updatedAt: ago(5) },
-    { id: 'edge', displayTitle: 'just inside', updatedAt: ago(11) },
-    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(20) },
+    { id: 'fresh1', displayTitle: 'fresh 1', updatedAt: ago(0.5) },
+    { id: 'fresh2', displayTitle: 'fresh 2', updatedAt: ago(2) },
+    { id: 'edge', displayTitle: 'just inside', updatedAt: ago(2.9) },
+    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(4) },
     { id: 'old2', displayTitle: 'old 2', updatedAt: ago(50) },
   ])
   tap('f')
@@ -2477,37 +2569,73 @@ check('the window opens on the last 12 hours only', () => {
   assert.deepEqual(
     state.rows.map((r) => r.id),
     ['fresh1', 'fresh2', 'edge'],
-    'only the last 12 hours up front'
+    'only the last three hours up front'
   )
   assert.equal(state.total, 5, 'the older ones stay in the pool, unshown')
   assert.equal(headerCount(), '3 / 5', 'the header must say how much is hidden')
-  assert.ok(footerText().includes('d'), 'the footer must point at the key that reveals more')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'the recent rows are under the browsing heading, the rest behind the seat'
+  )
+  assert.equal(sectionHeaders()[1].count, '2', 'which says how many it is hiding')
+  assert.ok(footerText().includes(expectedLabel('moreHint')), 'the footer must say how to reach the rest')
   tap('Escape')
 })
 
-check('the conversation on screen is the first row', () => {
+check('the window opens with the selection on the conversation on screen', () => {
   seed([
     { id: 'elsewhere', displayTitle: 'touched later', updatedAt: ago(0.01) },
     { id: 'here', displayTitle: 'where I am', updatedAt: ago(3), retainedBy: { mainView: 1 } },
   ])
   tap('f')
+  const state = fakeWindow.__dshVim.palette()
   assert.deepEqual(
-    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
-    ['here', 'elsewhere'],
-    'recency is not the whole order any more: the top row is where you are'
+    state.rows.map((r) => r.id),
+    ['elsewhere', 'here'],
+    'recency alone decides the order: no row is moved for being where you are'
   )
+  assert.equal(state.rows[state.index].id, 'here', 'the selection is the row you are already in')
+  assert.equal(state.index, 1, 'which is not the top of the list')
   const rows = rowNodes()
-  assert.equal(rows[0].children[0].textContent, 'where I am', 'the name is just the name')
-  assert.equal(rows[1].children[0].textContent, 'touched later', 'the rest are just their names')
+  assert.equal(rows[0].children[0].textContent, 'touched later', 'the newer row keeps the top')
+  assert.equal(rows[1].children[0].textContent, 'where I am', 'and the row you are in stays in its place')
   assert.deepEqual(
     rows.map((row) => (hereChip(row) ? hereChip(row).textContent : null)),
-    [expectedLabel('current'), null],
-    'and a chip beside the name says why the row is on top'
+    [null, expectedLabel('current')],
+    'the chip still says which row it is'
   )
   tap('Escape')
 })
 
-check('the here chip is a column of its own, ahead of the state', () => {
+check('switching conversations never reorders the list', () => {
+  seed([
+    { id: 'a', displayTitle: 'first', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'second', updatedAt: ago(2) },
+    { id: 'c', displayTitle: 'third', updatedAt: ago(3) },
+  ])
+  tap('f')
+  const before = fakeWindow.__dshVim.palette().rows.map((r) => r.id)
+  tap('d')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().rows[2].id, 'c', 'the selection moved down')
+  // The conversation on screen changes underneath the open window, as it does
+  // when a switch lands: the list must keep the order the reader just learned.
+  const feedRows = {
+    a: { id: 'a', displayTitle: 'first', updatedAt: ago(1) },
+    b: { id: 'b', displayTitle: 'second', updatedAt: ago(2), retainedBy: { mainView: 1 } },
+    c: { id: 'c', displayTitle: 'third', updatedAt: ago(3) },
+  }
+  feed.publish(['a', 'b', 'c'], feedRows)
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    before,
+    'the row order is untouched by where the window is pointing'
+  )
+  tap('Escape')
+})
+
+check('the state leads the row, and the here chip follows the name', () => {
   seed([
     { id: 'elsewhere', displayTitle: 'touched later', updatedAt: ago(0.01) },
     { id: 'here', displayTitle: 'where I am', updatedAt: ago(3), retainedBy: { mainView: 1 } },
@@ -2516,19 +2644,26 @@ check('the here chip is a column of its own, ahead of the state', () => {
   statusFeed.put('here', { running: true })
   tap('f')
   const rows = rowNodes()
-  const tag = hereChip(rows[0])
-  const chip = stateChip(rows[0])
-  assert.ok(tag, 'the row on screen carries the chip')
+  // The row on screen is the second one: the attention block leads the list, so
+  // the conversation that is actually running is not the one on screen here —
+  // `elsewhere` is idle and `here` is in flight, which puts `here` first. The
+  // check is about the columns, so it takes whichever row carries the tag.
+  const hereAt = rows.findIndex((row) => hereChip(row))
+  assert.ok(hereAt >= 0, 'the row on screen carries the chip')
+  const tag = hereChip(rows[hereAt])
+  const chip = stateChip(rows[hereAt])
   assert.ok(chip, 'and a state chip to lay out beside it')
-  // The stage chip sits between the tag and the state, so the state is one
-  // column further right than it was before the stage column existed.
-  assert.equal(tag.style.gridColumn, '3', 'the tag sits in its own column')
-  assert.equal(chip.style.gridColumn, '5', 'and the state past the stage column')
+  // The state is the row's first cell now: the window exists to answer "what
+  // needs me", so the row answers it at the edge every row is read from. The
+  // name follows, then the here tag, then the run of metadata.
+  assert.equal(chip.style.gridColumn, '1', 'the state leads the row')
+  assert.equal(tag.style.gridColumn, '3', 'the tag sits after the name')
+  assert.equal(stageBox(rows[hereAt]).style.gridColumn, '4', 'and the stage after the tag')
   // Every row reserves the same columns, so the state and time of the other row
   // start at the same x as the ones on this row.
-  assert.equal(rows[1].style.gridTemplateColumns, rows[0].style.gridTemplateColumns)
-  const tracks = rightTracks(rows[0])
-  assert.equal(tracks.length, 5, `tag, stage, state, turns, time: got ${tracks.join(' | ')}`)
+  assert.equal(rows[0].style.gridTemplateColumns, rows[1].style.gridTemplateColumns)
+  const tracks = rightTracks(rows[hereAt])
+  assert.equal(tracks.length, 4, `tag, stage, turns, time: got ${tracks.join(' | ')}`)
   assert.equal(
     tracks[0],
     tag.scrollWidth + 'px',
@@ -2536,12 +2671,17 @@ check('the here chip is a column of its own, ahead of the state', () => {
   )
   assert.equal(tag.style.justifySelf, 'end', 'and the tag sits on the right of its column')
   assert.equal(tag.style.whiteSpace, 'nowrap', 'a measured cell is one line')
+  assert.equal(chip.style.justifySelf, 'start', 'the state chip starts at the same x on every row')
+  assert.ok(
+    rows[hereAt].children.every((cell) => cell.style.gridRow === '1'),
+    'the status leads visually without creating a second implicit grid row'
+  )
   // The point of the whole move: a name behind a tag starts where every other
   // name starts, instead of after a prefix only that row was given.
-  const name = rows[0].children[0]
+  const name = rows[hereAt].children[0]
   assert.equal(name.style.gridColumn, '2', 'the name keeps its own column')
   assert.equal(
-    rows[1].children[0].style.gridColumn,
+    rows[0].children[0].style.gridColumn,
     name.style.gridColumn,
     'and the other rows start their names at the same x'
   )
@@ -2558,8 +2698,8 @@ check('with nothing on screen the tag column is not reserved', () => {
   assert.equal(hereChip(rows[0]), null, 'no row claims to be where you are')
   assert.equal(
     rightTracks(rows[0]).length,
-    4,
-    'and the list keeps its four right-hand columns rather than an empty one'
+    3,
+    'and the list keeps its three right-hand columns rather than an empty one'
   )
   tap('Escape')
 })
@@ -2578,11 +2718,11 @@ check('a tag on one row costs every row the same column, not only that one', () 
   tap('f')
   const rows = rowNodes()
   assert.equal(rightTracks(rows[0]).length, bare + 1, 'one column more for the tag')
-  assert.ok(hereChip(rows[0]), 'the row on screen carries the tag')
-  assert.equal(hereChip(rows[1]), null, 'a row with nothing to say carries no tag')
+  assert.ok(hereChip(rows[1]), 'the row on screen carries the tag')
+  assert.equal(hereChip(rows[0]), null, 'a row with nothing to say carries no tag')
   assert.equal(
-    rows[1].style.gridTemplateColumns,
     rows[0].style.gridTemplateColumns,
+    rows[1].style.gridTemplateColumns,
     'and it reserves the same empty column, so the two rows still line up'
   )
   tap('Escape')
@@ -2605,25 +2745,32 @@ check('a conversation on screen that the filters hide reserves no column', () =>
   )
   assert.equal(
     rightTracks(rows[0]).length,
-    4,
+    3,
     'so its tag leaves no empty column behind'
   )
   tap('Escape')
 })
 
-check('the pinned row is loaded even when it is outside the recency window', () => {
+check('the conversation on screen is loaded even when it is outside the window', () => {
   seed([
     { id: 'fresh', displayTitle: 'fresh', updatedAt: ago(0.01) },
     { id: 'stale', displayTitle: 'stale', updatedAt: ago(30) },
     { id: 'here', displayTitle: 'an old one I am in', updatedAt: ago(48), retainedBy: { mainView: 1 } },
   ])
   tap('f')
+  const state = fakeWindow.__dshVim.palette()
   assert.deepEqual(
-    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
-    ['here', 'fresh'],
-    'the row on screen leads the batch; the 12-hour window still hides the rest'
+    state.rows.map((r) => r.id),
+    ['fresh', 'here'],
+    'the row on screen is pulled into today, in its own place; the rest is behind More'
   )
-  assert.equal(headerCount(), '2 / 3', 'and the header still counts what is hidden')
+  assert.equal(state.rows[state.index].id, 'here', 'and the selection is on it')
+  assert.equal(headerCount(), '2 / 3', 'the header still counts what is hidden')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'the rest is under the More seat'
+  )
   tap('Escape')
 })
 
@@ -2640,7 +2787,7 @@ check('a hidden conversation does not jump the queue', () => {
   tap('Escape')
 })
 
-check('pressing d at the end of the list reveals older conversations', () => {
+check('walking the list with the keys never reveals anything', () => {
   seed([
     { id: 'fresh1', displayTitle: 'fresh 1', updatedAt: ago(1) },
     { id: 'fresh2', displayTitle: 'fresh 2', updatedAt: ago(2) },
@@ -2651,19 +2798,100 @@ check('pressing d at the end of the list reveals older conversations', () => {
   tap('d')
   assert.equal(fakeWindow.__dshVim.palette().index, 1, 'moving inside the loaded rows changes nothing else')
   assert.equal(fakeWindow.__dshVim.palette().rows.length, 2)
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'the older ones are behind More'
+  )
+  // The end of the list is not an instruction to fetch the next batch: the More
+  // seat is on screen with the number behind it, so loading more is a press.
+  // The walk reaches the seat, and standing on it loads nothing by itself.
   tap('d')
   const after = fakeWindow.__dshVim.palette()
-  assert.equal(after.rows.length, 4, 'reaching the end must reveal the rest')
-  assert.equal(after.rows[after.index].id, 'old1', 'and land on the first newly revealed row')
-  assert.equal(headerCount(), '4', 'a fully revealed list drops the loaded/total split')
+  assert.equal(after.rows.length, 2, 'the down key must not add a single row')
+  assert.equal(after.onMore, true, 'it steps onto the More seat, which is a place like any other')
+  assert.equal(after.index, 1, 'and the row index stays where it was, behind the seat')
+  assert.equal(headerCount(), '2 / 4', 'and the readout still says how much is hidden')
+  assert.equal(sectionHeaders()[1].count, '2', 'the seat still counts what it is holding')
   tap('d')
-  assert.equal(fakeWindow.__dshVim.palette().index, 3, 'with nothing left to reveal, d just moves')
-  tap('d')
-  assert.equal(fakeWindow.__dshVim.palette().index, 0, 'past the true end it wraps')
+  const wrapped = fakeWindow.__dshVim.palette()
+  assert.equal(wrapped.onMore, false, 'stepping off the seat wraps round to the top')
+  assert.equal(wrapped.rows[wrapped.index].id, 'fresh1', 'which is the first row')
+  assert.equal(wrapped.rows.length, 2, 'nothing new was loaded along the way')
   tap('Escape')
 })
 
-check('with no 12-hour activity the newest batch is shown, not an empty window', () => {
+check('clicking the More seat reveals the next batch and leaves the selection alone', () => {
+  seed([
+    { id: 'fresh1', displayTitle: 'fresh 1', updatedAt: ago(1) },
+    { id: 'fresh2', displayTitle: 'fresh 2', updatedAt: ago(2) },
+    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(20) },
+    { id: 'old2', displayTitle: 'old 2', updatedAt: ago(50) },
+  ])
+  tap('f')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 2, 'nothing is loaded until it is asked for')
+  assert.equal(moreHeadingNode().style.cursor, 'pointer', 'the seat offers a pointer while it has something to give')
+  clickMore()
+  const after = fakeWindow.__dshVim.palette()
+  assert.equal(after.rows.length, 4, 'the press loads the rest')
+  assert.equal(after.rows[after.index].id, 'fresh2', 'and the selection is still the row it was on')
+  assert.equal(headerCount(), '4', 'a fully revealed list drops the loaded/total split')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'one More seat holds them all, under the browsing heading'
+  )
+  assert.equal(sectionHeaders()[1].count, null, 'a fully revealed More has no count left to give')
+  // Nothing is left behind it, so it is a heading again: no pointer, and a press
+  // on it does nothing at all.
+  assert.notEqual(moreHeadingNode().style.cursor, 'pointer', 'an empty seat must not look clickable')
+  const before = fakeWindow.__dshVim.palette()
+  clickMore()
+  assert.deepEqual(fakeWindow.__dshVim.palette().rows.length, before.rows.length, 'a press on it changes nothing')
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'and it never closes the window')
+  tap('Escape')
+})
+
+check('the More seat loads one batch at a time, however much is behind it', () => {
+  const old = []
+  for (let i = 0; i < 25; i++) {
+    old.push({ id: 'old' + i, displayTitle: 'old ' + i, updatedAt: ago(20 + i) })
+  }
+  seed([{ id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) }, ...old])
+  tap('f')
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 1, 'only the recent one is up front')
+  assert.equal(sectionHeaders()[1].count, '25', 'and the seat counts all of it')
+  clickMore()
+  const after = fakeWindow.__dshVim.palette()
+  assert.equal(after.rows.length, 21, 'one press is one batch, not the whole archive')
+  assert.equal(after.index, 0, 'the selection never moved to follow the new rows')
+  assert.equal(sectionHeaders()[1].count, '5', 'what is left behind is counted down')
+  clickMore()
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 26, 'and the next press takes the rest')
+  assert.equal(sectionHeaders()[1].count, null, 'with nothing behind it the count is gone')
+  tap('Escape')
+})
+
+check('the browsing heading reveals nothing, however it is pressed', () => {
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'old', displayTitle: 'old', updatedAt: ago(30) },
+  ])
+  tap('f')
+  const heading = listNodes().find(
+    (node) => node.__attrs['data-session-id'] === undefined && String(node.children[0].textContent) === expectedLabel('groupRecent')
+  )
+  assert.ok(heading, 'the browsing block has a heading of its own')
+  assert.notEqual(heading.style.cursor, 'pointer', 'and it must not look like something to press')
+  fireOn(heading, 'mousedown', { type: 'mousedown', preventDefault() {}, stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 1, 'pressing it adds nothing')
+  assert.equal(fakeWindow.__dshVim.palette().index, 0, 'and moves nothing')
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'the window stays')
+  tap('Escape')
+})
+
+check('with no recent activity the newest batch is shown, not an empty window', () => {
   seed([
     { id: 'a', displayTitle: 'a', updatedAt: ago(30) },
     { id: 'b', displayTitle: 'b', updatedAt: ago(40) },
@@ -2673,6 +2901,65 @@ check('with no 12-hour activity the newest batch is shown, not an empty window',
   const state = fakeWindow.__dshVim.palette()
   assert.equal(state.rows.length, 3, 'an idle day must not open an empty window')
   assert.deepEqual(state.rows.map((r) => r.id), ['a', 'b', 'c'])
+  // The fallback is still history, so the heading must say so: the block answers
+  // "did anything happen lately", and the answer here is "no". Calling these rows
+  // "recent" is the one lie a heading can tell that the reader cannot check
+  // without reading every row's timestamp.
+  assert.equal(state.stale, true, 'the block must know it is showing history')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupHistory')],
+    'and it must be named for what it holds, not for a window it never had'
+  )
+  tap('Escape')
+})
+
+check('a run the reader is watching keeps the window honest about the time', () => {
+  // The bug this pins: freshness used to be counted after the attention blocks
+  // had already taken their rows out of `rest`. On an afternoon whose only
+  // recent activity was the run in flight, `rest` looked dead, the fallback
+  // fired, and three-day-old conversations were listed under "Recent". The
+  // window must measure the window against the whole pool, not against what is
+  // left once the attention blocks have had their pick.
+  seed([
+    { id: 'busy', displayTitle: 'the run I am watching', updatedAt: ago(0.2) },
+    { id: 'old1', displayTitle: 'three days ago', updatedAt: ago(72) },
+    { id: 'old2', displayTitle: 'four days ago', updatedAt: ago(96) },
+  ])
+  statusFeed.put('busy', { running: true })
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.stale, false, 'a run in flight is activity: the day is not quiet')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupLive'), expectedLabel('groupMore')],
+    'the old rows stay behind the seat instead of landing under a Recent heading'
+  )
+  assert.deepEqual(
+    state.rows.map((r) => r.id),
+    ['busy'],
+    'and the browsing block holds nothing, because nothing in it is recent'
+  )
+  assert.equal(sectionHeaders()[1].count, '2', 'the seat still offers the history')
+  tap('Escape')
+})
+
+check('a row waiting on the reader also keeps the day from reading as quiet', () => {
+  // Same scope question, the other attention block: an approval parked five
+  // minutes ago is the newest thing in the pool even though it is not in `rest`.
+  seed([
+    { id: 'ask', displayTitle: 'waiting on you', updatedAt: ago(0.1) },
+    { id: 'old', displayTitle: 'last week', updatedAt: ago(168) },
+  ])
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.stale, false, 'something happened in the window, and the block must know it')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupMine'), expectedLabel('groupMore')],
+    'the week-old row stays behind the seat rather than being dressed up as recent'
+  )
   tap('Escape')
 })
 
@@ -3057,81 +3344,220 @@ check('the rename key cannot collide with the rest of its group', () => {
 })
 
 // --- the folder a conversation lives in -------------------------------------
+//
+// A folder is a label on a row now, not a container around rows. It used to be
+// a block heading: one block per folder, in the registry's own order. That made
+// the folder the unit the reader navigated in, and it had a cost that only
+// showed on a busy day — the cap was spent folder by folder in registry order,
+// so a busy folder could take the whole twenty and leave a quiet one with
+// nothing, even when the quiet one held the newest conversations on the list.
+// The block heading is gone; the prefix on every row is what carries the
+// folder, and the list is ordered by recency alone.
 
-check('every row shows the folder its conversation lives in', () => {
+check('every row names its own folder, and no heading says it for a group', () => {
   registry.publish([], [
     { workspaceId: 'w1', title: 'dsh-vim', path: 'G:\\桌面\\dsh-vim', sessionIds: ['a'] },
-    { workspaceId: 'w2', title: '', path: 'G:\\work\\api-service', sessionIds: ['b'] },
+    { workspaceId: 'w2', title: 'api-service', path: 'G:\\work\\api-service', sessionIds: ['b'] },
   ])
   seed([
     { id: 'a', displayTitle: 'in a named folder', updatedAt: ago(1) },
-    { id: 'b', displayTitle: 'in an unnamed folder', updatedAt: ago(2) },
+    { id: 'b', displayTitle: 'in another folder', updatedAt: ago(2) },
     { id: 'c', displayTitle: 'loose', updatedAt: ago(3) },
   ])
   tap('f')
   const rows = rowNodes()
-  assert.equal(rows[0].children[0].textContent, 'dsh-vim', 'the folder comes first on the row')
-  assert.equal(rows[0].children[1].textContent, 'in a named folder', 'then the conversation')
-  assert.equal(rows[0].children[0].getAttribute('title'), 'G:\\桌面\\dsh-vim', 'with the path as its tooltip')
-  assert.equal(rows[1].children[0].textContent, 'api-service', 'a folder with no title reads as its last segment')
-  assert.equal(rows[2].children[0].textContent, 'loose', 'a conversation no folder accounts for has no chip')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent')],
+    'there is one browsing heading, and it does not name a folder'
+  )
+  assert.equal(folderPrefix(rows[0]).textContent, 'dsh-vim', 'each row carries its own folder')
+  assert.equal(folderPrefix(rows[1]).textContent, 'api-service', 'including the second folder')
+  assert.equal(folderPrefix(rows[2]), null, 'and a row no folder accounts for carries none')
+  assert.equal(nameText(rows[0]), 'in a named folder', 'the name still follows the prefix')
   tap('Escape')
 })
 
-check('folder names and conversation names each share one left edge', () => {
+check('the list is ordered by recency, not by folder', () => {
   registry.publish([], [
-    { workspaceId: 'w1', title: 'dsh-vim', path: 'G:\\桌面\\dsh-vim', sessionIds: ['a'] },
-    { workspaceId: 'w2', title: 'a-much-longer-folder-name', path: 'G:\\work\\api-service', sessionIds: ['b'] },
+    { workspaceId: 'w2', title: 'second', path: 'G:\\work\\second', sessionIds: ['c'] },
+    { workspaceId: 'w1', title: 'first', path: 'G:\\work\\first', sessionIds: ['a', 'b'] },
   ])
   seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'b', updatedAt: ago(2) },
+    { id: 'c', displayTitle: 'c', updatedAt: ago(3) },
+  ])
+  tap('f')
+  // The registry order is no longer the order of anything: `c` is newest and
+  // leads, even though its folder is listed second, and `a` and `b` are no
+  // longer held together as a block.
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['a', 'b', 'c'],
+    'plain recency decides, whatever folder a row is in'
+  )
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent')],
+    'and no folder gets a heading of its own'
+  )
+  tap('Escape')
+})
+
+check('a busy folder cannot starve a quiet one out of the list', () => {
+  // The bug this flattening fixes: the cap used to be spent folder by folder in
+  // registry order, so thirty conversations in the first folder took the whole
+  // batch and the second folder — holding the two newest conversations on the
+  // list — never appeared at all.
+  const busy = []
+  for (let i = 0; i < 30; i++) busy.push('busy' + i)
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'busy', path: 'G:\\work\\busy', sessionIds: busy },
+    { workspaceId: 'w2', title: 'quiet', path: 'G:\\work\\quiet', sessionIds: ['q1', 'q2'] },
+  ])
+  const rows = busy.map((id, i) => ({ id, displayTitle: id, updatedAt: ago(1 + i * 0.01) }))
+  rows.push({ id: 'q1', displayTitle: 'q1', updatedAt: ago(0.1) })
+  rows.push({ id: 'q2', displayTitle: 'q2', updatedAt: ago(0.2) })
+  seed(rows)
+  tap('f')
+  const shown = fakeWindow.__dshVim.palette().rows.map((r) => r.id)
+  assert.ok(shown.includes('q1') && shown.includes('q2'), 'the newest conversations must be shown')
+  assert.deepEqual(shown.slice(0, 2), ['q1', 'q2'], 'and being newest, they lead the list')
+  tap('Escape')
+})
+
+check('More has one heading for many folders, so its rows name their own', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'dsh-vim', path: 'G:\\桌面\\dsh-vim', sessionIds: ['a', 'old1', 'old2'] },
+    { workspaceId: 'w2', title: '', path: 'G:\\work\\api-service', sessionIds: ['old3'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'today', updatedAt: ago(1) },
+    { id: 'old1', displayTitle: 'older one', updatedAt: ago(20) },
+    { id: 'old2', displayTitle: 'older two', updatedAt: ago(30) },
+    { id: 'old3', displayTitle: 'older three', updatedAt: ago(40) },
+  ])
+  tap('f')
+  clickMore()
+  const rows = rowNodes()
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'the recent row is under the browsing heading, the older ones under the seat'
+  )
+  assert.equal(folderPrefix(rows[0]).textContent, 'dsh-vim', 'the recent row names its folder too')
+  assert.equal(nameText(rows[0]), 'today', 'and the name follows the prefix')
+  assert.equal(folderPrefix(rows[1]).textContent, 'dsh-vim', 'a row under More says which folder it is')
+  assert.equal(folderPrefix(rows[2]).textContent, 'dsh-vim', 'as does its folder mate')
+  assert.equal(
+    folderPrefix(rows[3]).textContent,
+    'api-service',
+    'a folder with no title reads as its last segment'
+  )
+  assert.equal(nameText(rows[1]), 'older one', 'and the conversation name still follows it')
+  tap('Escape')
+})
+
+check('the folder prefix is text in the name cell, not a column', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'a-much-longer-folder-name', path: 'G:\\work\\api', sessionIds: ['old'] }])
+  seed([
     { id: 'a', displayTitle: 'a name', updatedAt: ago(1) },
-    { id: 'b', displayTitle: 'another name', updatedAt: ago(2) },
-    { id: 'c', displayTitle: 'no folder', updatedAt: ago(3) },
+    { id: 'old', displayTitle: 'an older name', updatedAt: ago(40) },
+  ])
+  tap('f')
+  const before = rowNodes()[0].style.gridTemplateColumns
+  clickMore()
+  const rows = rowNodes()
+  const prefix = folderPrefix(rows[1])
+  assert.ok(prefix, 'the row that arrived from More names its folder')
+  assert.ok(!prefix.style.gridColumn, 'the prefix claims no grid line of its own')
+  assert.equal(
+    rows[1].children.some((cell) => cell.getAttribute('data-role') === 'folder'),
+    false,
+    'so it is not a cell of the row either, and cannot become a column by accident'
+  )
+  assert.equal(rows[1].children[0].style.gridColumn, '2', 'the name cell is still the name column')
+  assert.equal(prefix.style.opacity, '0.5', 'and the prefix reads as dimmed text rather than as a badge')
+  assert.ok(!prefix.style.background, 'a pill behind it would put the block back to what it was')
+  // The price of the old column, now gone: pressing More cannot move a row that
+  // was already on screen, because nothing that is already there is measured.
+  assert.equal(
+    rows[0].style.gridTemplateColumns,
+    before,
+    'the template the first row was laid out with is the one it keeps'
+  )
+  assert.equal(rows.length, 2, 'and the older row did arrive')
+  tap('Escape')
+})
+
+check('the conversation name is dimmed, and the folder in front of it stays dimmer', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'a folder', path: 'G:\\work\\one', sessionIds: ['a'] }])
+  seed([{ id: 'a', displayTitle: 'a name', updatedAt: ago(1) }])
+  tap('f')
+  const row = rowNodes()[0]
+  const name = row.children[0].children.find((c) => c.getAttribute('data-role') === 'nameText')
+  const prefix = folderPrefix(row)
+  assert.equal(name.style.opacity, '0.72', 'the name is dimmed so a screen of them can be scanned')
+  assert.equal(prefix.style.opacity, '0.5', 'and the folder label is dimmer still, being the qualifier')
+  // The two must not multiply: the name is dimmed on its own span, so the
+  // prefix inside the same cell keeps the opacity it was given.
+  assert.ok(!row.children[0].style.opacity, 'the cell around them carries no opacity of its own')
+  tap('Escape')
+})
+
+check('a conversation no folder accounts for is named by nothing', () => {
+  registry.clear()
+  seed([{ id: 'a', displayTitle: 'loose', updatedAt: ago(40) }])
+  tap('f')
+  tap('d')
+  assert.equal(folderPrefix(rowNodes()[0]), null, 'no folder, so there is nothing to prefix')
+  assert.equal(nameText(rowNodes()[0]), 'loose', 'and the name is still the whole of the name cell')
+  tap('Escape')
+})
+
+check('a row being renamed shows the name box, not a prefix in front of it', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: 'G:\\桌面\\dsh-vim', sessionIds: ['old'] }])
+  seed([
+    { id: 'a', displayTitle: 'today', updatedAt: ago(1) },
+    { id: 'old', displayTitle: 'older name', updatedAt: ago(40) },
+  ])
+  tap('f')
+  clickMore()
+  // Walk onto the More row and rename it: the input takes the whole name cell.
+  tap('d')
+  assert.equal(rowNodes()[1].getAttribute('data-session-id'), 'old')
+  tap('r')
+  const box = renameBox()
+  assert.ok(box, 'the row under More can be renamed')
+  assert.equal(folderPrefix(rowNodes()[1]), null, 'and the prefix steps aside for the box being typed into')
+  assert.equal(box.style.gridColumn, '2', 'the name box is still the name column')
+  tap('Escape')
+})
+
+check('the state is the first column, the name the second, the tag the third', () => {
+  // Pinned rather than derived: a column added later would move every one of
+  // these numbers, and nothing else in the suite would notice.
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'here', displayTitle: 'here', updatedAt: ago(2), retainedBy: { mainView: 1 } },
   ])
   tap('f')
   const rows = rowNodes()
-  assert.equal(rows[0].style.display, 'grid', 'a row is a grid, so its cells are columns')
-  assert.equal(
-    rows[2].style.gridTemplateColumns,
-    rows[0].style.gridTemplateColumns,
-    'every row reserves the same columns, folder or not'
-  )
-  // 25 characters at the fake DOM's 8px each: the column follows the longest
-  // name instead of a fixed guess, and stays capped when one is too long.
-  assert.ok(
-    rows[0].style.gridTemplateColumns.startsWith('minmax(0, min(200px, 38%))'),
-    `the column is fitted to the widest folder name, got ${rows[0].style.gridTemplateColumns}`
-  )
-  assert.equal(rows[0].children[0].style.justifySelf, 'start', 'the folder sits on the left of its column')
-  assert.equal(rows[0].children[0].style.textAlign, 'left', 'and its name reads left to right')
-  assert.equal(rows[0].children[1].style.gridColumn, '2', 'the conversation name starts in the name column')
-  assert.equal(rows[1].children[1].style.gridColumn, '2', 'even behind a long folder name')
-  assert.equal(rows[2].children[0].style.gridColumn, '2', 'and on a row with no folder at all')
-  assert.equal(rows[2].children[0].style.textAlign, 'left', 'the name itself is left aligned')
+  const tag = hereChip(rows[1])
+  assert.ok(tag, 'the row on screen carries the tag')
+  assert.equal(rows[1].children[0].style.gridColumn, '2', 'the conversation name is the second column')
+  assert.equal(tag.style.gridColumn, '3', 'the tag is the third')
+  assert.equal(stageBox(rows[1]).style.gridColumn, '4', 'the stage the fourth')
+  assert.equal(rightTracks(rows[1]).length, 4, 'tag, stage, turns, time')
+  assert.equal(rows[0].children[0].style.gridColumn, '2', 'and every other row starts its name at the same x')
   tap('Escape')
-})
-
-check('the folder column is only as wide as the names on screen', () => {
-  registry.publish([], [{ workspaceId: 'w1', title: 'web', path: 'G:\\work\\web', sessionIds: ['a'] }])
-  seed([{ id: 'a', displayTitle: 'a name', updatedAt: ago(1) }])
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: ago(1) }])
   tap('f')
-  // 3 characters, so the column collapses to what "web" needs — not the
-  // starting 8em guess, and not the width some other folder happened to need.
-  assert.ok(
-    rowNodes()[0].style.gridTemplateColumns.startsWith('minmax(0, min(24px, 38%))'),
-    `a short folder leaves a tight column, got ${rowNodes()[0].style.gridTemplateColumns}`
-  )
-  tap('Escape')
-})
-
-check('with no folder to show, the folder column is collapsed', () => {
-  registry.clear()
-  seed([{ id: 'a', displayTitle: 'still here', updatedAt: ago(1) }])
-  tap('f')
-  assert.ok(
-    rowNodes()[0].style.gridTemplateColumns.startsWith('0 '),
-    'an empty folder column must not indent every row'
-  )
+  const bare = rowNodes()[0]
+  assert.equal(hereChip(bare), null, 'no row claims to be where you are')
+  assert.equal(rightTracks(bare).length, 3, 'so the list keeps its three right-hand columns')
+  assert.equal(stageBox(bare).style.gridColumn, '3', 'and the stage moves into the gap the tag would have left')
   tap('Escape')
 })
 
@@ -3139,7 +3565,438 @@ check('a host without a workspace registry still lists conversations', () => {
   registry.clear()
   seed([{ id: 'a', displayTitle: 'still here', updatedAt: ago(1) }])
   tap('f')
-  assert.equal(rowNodes()[0].children[0].textContent, 'still here', 'the row is just the name')
+  assert.equal(nameText(rowNodes()[0]), 'still here', 'the row is just the name')
+  assert.deepEqual(sectionNames(), [expectedLabel('groupRecent')], 'and the browsing heading is still there')
+  tap('Escape')
+})
+
+// --- one heading per block, and none of them a folder ------------------------
+
+check('the More heading says how much is behind it', () => {
+  seed([
+    { id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) },
+    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(20) },
+    { id: 'old2', displayTitle: 'old 2', updatedAt: ago(30) },
+    { id: 'old3', displayTitle: 'old 3', updatedAt: ago(40) },
+  ])
+  tap('f')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent'), expectedLabel('groupMore')],
+    'the fresh one is under the browsing heading, the rest under the seat'
+  )
+  assert.equal(sectionHeaders()[1].count, '3', 'which counts them')
+  clickMore()
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.rows.length, 4, 'the press on it loads them')
+  assert.equal(sectionHeaders()[1].count, null, 'and the count goes away when nothing is left behind')
+  tap('Escape')
+})
+
+check('a heading is not a row: it is never selectable', () => {
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'b', updatedAt: ago(2) },
+  ])
+  tap('f')
+  // One browsing heading and two rows, so a selection that counted elements
+  // would be able to land on the heading. It must not: the movement keys walk
+  // the rows. (Nothing is behind the seat here, so there is no seat.)
+  assert.equal(listNodes().length, 3, 'the browsing heading and both rows')
+  assert.equal(rowNodes().length, 2, 'but only the rows are rows')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().index, 1, 'd moves between conversations')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().index, 0, 'and wraps over the heading, not onto it')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, false, 'no heading is standable when nothing is behind it')
+  tap('Escape')
+})
+
+// --- what is waiting on the reader, ahead of where things live ---------------
+
+check('what is waiting on the reader leads the list', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'a folder', path: 'G:\\work\\one', sessionIds: ['idle', 'ask'] },
+  ])
+  seed([
+    { id: 'idle', displayTitle: 'nothing owed', updatedAt: ago(1) },
+    { id: 'ask', displayTitle: 'needs an answer', updatedAt: ago(2) },
+  ])
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  tap('f')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupMine'), expectedLabel('groupRecent')],
+    'the attention block is its own heading, and the browsing rows keep theirs'
+  )
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['ask', 'idle'],
+    'the row that needs the reader comes first, however old it is'
+  )
+  tap('Escape')
+})
+
+check('a conversation waiting since yesterday is not hidden behind More', () => {
+  // The point of reading the attention blocks off the whole pool: a debt older
+  // than the recency window is the one most worth seeing, and a window that only
+  // looked at the last twelve hours would file it under "More".
+  seed([
+    { id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) },
+    { id: 'stuck', displayTitle: 'stuck since yesterday', updatedAt: ago(30) },
+  ])
+  statusFeed.put('stuck', { running: false, pendingInteraction: { kind: 'answer' } })
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.deepEqual(
+    state.rows.map((r) => r.id),
+    ['stuck', 'fresh'],
+    'the old debt is up front, not behind the seat'
+  )
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupMine'), expectedLabel('groupRecent')],
+    'and it is not under a More heading'
+  )
+  tap('Escape')
+})
+
+check('a row in the attention block is not repeated in the browsing block', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'a folder', path: 'G:\\work\\one', sessionIds: ['ask', 'idle'] },
+  ])
+  seed([
+    { id: 'ask', displayTitle: 'needs an answer', updatedAt: ago(1) },
+    { id: 'idle', displayTitle: 'nothing owed', updatedAt: ago(2) },
+  ])
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  tap('f')
+  const ids = fakeWindow.__dshVim.palette().rows.map((r) => r.id)
+  assert.equal(ids.length, new Set(ids).size, 'no conversation appears twice')
+  assert.deepEqual(ids, ['ask', 'idle'], 'the owed row is listed once, in the block that claims it')
+  // A conversation pinned to the top must not also spend the browsing cap.
+  const recent = fakeWindow.__dshVim.palette().sections.find((s) => s.kind === 'recent')
+  assert.deepEqual(recent.ids, ['idle'], 'the browsing block no longer holds the row that moved up')
+  tap('Escape')
+})
+
+check('the oldest debt comes first inside the waiting block', () => {
+  seed([
+    { id: 'newer', displayTitle: 'just asked', updatedAt: ago(0.1) },
+    { id: 'older', displayTitle: 'asked a while ago', updatedAt: ago(3) },
+  ])
+  // Both were seen entering flight, so the block can order by how long they have
+  // been waiting rather than by when they were last touched.
+  statusFeed.put('older', { running: true })
+  statusFeed.put('newer', { running: true })
+  clock.advance(5 * 60 * 1000)
+  statusFeed.put('older', { running: false, pendingInteraction: { kind: 'approval' } })
+  statusFeed.put('newer', { running: false, pendingInteraction: { kind: 'answer' } })
+  tap('f')
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['older', 'newer'],
+    'the conversation that has been waiting longer is on top'
+  )
+  tap('Escape')
+})
+
+check('a conversation in flight is listed apart, and does not lead', () => {
+  seed([
+    { id: 'busy', displayTitle: 'running now', updatedAt: ago(1) },
+    { id: 'idle', displayTitle: 'quiet', updatedAt: ago(2) },
+  ])
+  statusFeed.put('busy', { running: true })
+  tap('f')
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupLive'), expectedLabel('groupRecent')],
+    'the in-flight block is named, and the browsing rows keep their own heading'
+  )
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['busy', 'idle'],
+    'it is listed above the browsing rows'
+  )
+  tap('Escape')
+})
+
+check('the in-flight block is dimmed, and a waiting row is not', () => {
+  seed([
+    { id: 'busy', displayTitle: 'running now', updatedAt: ago(1) },
+    { id: 'ask', displayTitle: 'needs me', updatedAt: ago(2) },
+  ])
+  statusFeed.put('busy', { running: true })
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  tap('f')
+  const rows = rowNodes()
+  const order = fakeWindow.__dshVim.palette().rows.map((r) => r.id)
+  assert.deepEqual(order, ['ask', 'busy'], 'the waiting row leads')
+  // The dimming is the whole difference between "this wants you" and "this is
+  // merely moving": same row, same columns, less weight.
+  assert.ok(!rows[0].style.opacity, 'a row waiting on the reader is at full weight')
+  assert.equal(rows[1].style.opacity, '0.62', 'a row in flight is dimmed')
+  tap('Escape')
+})
+
+check('the window opens on the first thing waiting on the reader', () => {
+  seed([
+    { id: 'top', displayTitle: 'newest but quiet', updatedAt: ago(1) },
+    { id: 'ask', displayTitle: 'needs me', updatedAt: ago(9) },
+  ])
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.rows[state.index].id, 'ask', 'the selection lands on what is owed, not on the newest row')
+  tap('Escape')
+})
+
+check('with nothing owed the window opens where the reader already is', () => {
+  seed([
+    { id: 'newest', displayTitle: 'newest', updatedAt: ago(1) },
+    { id: 'here', displayTitle: 'where I am', updatedAt: ago(4), retainedBy: { mainView: 1 } },
+  ])
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.rows[state.index].id, 'here', 'the fallback is the old behaviour, unchanged')
+  tap('Escape')
+})
+
+check('dealing with one row makes the next press land on the next owed one', () => {
+  seed([
+    { id: 'first', displayTitle: 'first debt', updatedAt: ago(9) },
+    { id: 'second', displayTitle: 'second debt', updatedAt: ago(1) },
+  ])
+  statusFeed.put('first', { running: false, pendingInteraction: { kind: 'approval' } })
+  statusFeed.put('second', { running: false, pendingInteraction: { kind: 'answer' } })
+  tap('f')
+  assert.equal(fakeWindow.__dshVim.palette().rows[0].id, 'first', 'the older debt is on top')
+  // The reader deals with it: the approval is given, so the turn resumes and the
+  // row is no longer waiting. That is the queue behaviour — no key, no bookmark.
+  statusFeed.put('first', { running: true })
+  tap('Escape')
+  tap('f')
+  assert.equal(
+    fakeWindow.__dshVim.palette().rows[0].id,
+    'second',
+    'the next press opens on the next thing owed'
+  )
+  tap('Escape')
+})
+
+check('the headline says what is waiting, and can say nothing is', () => {
+  seed([{ id: 'busy', displayTitle: 'running', updatedAt: ago(1) }])
+  statusFeed.put('busy', { running: true })
+  tap('f')
+  assert.equal(
+    fakeWindow.__dshVim.palette().headline,
+    '1 ' + expectedLabel('headLive'),
+    'a running turn is reported as in flight, not as waiting on the reader'
+  )
+  tap('Escape')
+  // Nothing owed and nothing moving: the window can say so, which is the one
+  // thing a header of raw counts could never do.
+  seed([{ id: 'quiet', displayTitle: 'quiet', updatedAt: ago(1) }])
+  tap('f')
+  assert.equal(
+    fakeWindow.__dshVim.palette().headline,
+    expectedLabel('headQuiet'),
+    'the quiet case gets a sentence, not a count'
+  )
+  tap('Escape')
+})
+
+check('the More seat can be reached with the movement keys', () => {
+  const older = []
+  for (let i = 1; i <= 21; i++) {
+    older.push({ id: 'old' + i, displayTitle: 'old ' + i, updatedAt: ago(20 + i) })
+  }
+  seed([{ id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) }, ...older])
+  tap('f')
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 1, 'only the fresh one is loaded')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, true, 'd walks onto the seat, which has something behind it')
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 1, 'standing on it loads nothing by itself')
+  // Confirming while standing on it is what opens it, so the keyboard reaches
+  // the older conversations without any key gaining a second meaning.
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.rows.length, 21, 'the press revealed a batch')
+  assert.equal(state.onMore, true, 'and with more still behind it, the cursor stays on the seat')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, false, 'stepping down leaves the seat for a row')
+  tap('Escape')
+})
+
+check('the seat is not a row: no key acts on the row it stands in front of', () => {
+  const older = []
+  for (let i = 1; i <= 21; i++) {
+    older.push({ id: 'old' + i, displayTitle: 'old ' + i, updatedAt: ago(20 + i) })
+  }
+  seed([{ id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) }, ...older])
+  tap('f')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, true, 'the cursor is on the seat')
+  // Confirming on the seat opens the seat. It must never travel to the row the
+  // seat is drawn in front of — that is the conversation the reader has already
+  // stepped past.
+  opened.length = 0
+  tap('Enter')
+  assert.deepEqual(opened, [], 'confirming on the seat opens the seat, never the row above it')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, true, 'and the cursor is still on the seat')
+  assert.equal(fakeWindow.__dshVim.palette().rows.length, 21, 'the seat gave up its batch')
+  // The keys that act on "the selected conversation" must find nothing to act
+  // on, rather than silently grabbing the row behind the seat.
+  tap('r')
+  assert.equal(
+    listNodes().some((node) => node.children[0] && node.children[0].tagName === 'INPUT'),
+    false,
+    'rename finds no conversation under the cursor and opens no name box'
+  )
+  tap('Escape')
+})
+
+check('the seat stops being a place once nothing is behind it', () => {
+  seed([
+    { id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) },
+    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(20) },
+  ])
+  tap('f')
+  tap('d')
+  assert.equal(fakeWindow.__dshVim.palette().onMore, true, 'there is something behind it, so it can be stood on')
+  // That batch was the last one, so the seat is no longer a place to stand: the
+  // cursor comes off it and onto the first row it revealed, rather than staying
+  // on a heading that has nothing left to give.
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.equal(state.onMore, false, 'the seat is gone once it is empty')
+  assert.equal(state.rows.length, 2, 'and the batch it revealed is on screen')
+  assert.equal(state.rows[state.index].id, 'old1', 'with the cursor on the first row it revealed')
+  tap('Escape')
+})
+
+check('the footer says how to reach the seat while it has something behind it', () => {
+  seed([
+    { id: 'fresh', displayTitle: 'fresh', updatedAt: ago(1) },
+    { id: 'old1', displayTitle: 'old 1', updatedAt: ago(20) },
+  ])
+  tap('f')
+  assert.ok(footerText().includes(expectedLabel('moreHint')), 'the hint names the seat while it can be reached')
+  tap('Escape')
+  // A list with nothing behind the seat must not advertise one.
+  seed([{ id: 'only', displayTitle: 'only', updatedAt: ago(1) }])
+  tap('f')
+  assert.ok(!footerText().includes(expectedLabel('moreHint')), 'and drops it when there is nothing to reach')
+  tap('Escape')
+})
+
+check('a clock under a minute shows no duration at all', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: ago(1) }])
+  statusFeed.put('a', { running: false })
+  statusFeed.put('a', { running: true })
+  clock.advance(59 * 1000)
+  tap('f')
+  assert.deepEqual(
+    renderedStatuses(),
+    [[expectedLabel('statusRunning')]],
+    'under a minute there is no duration worth reading, so none is shown'
+  )
+  clock.advance(1000)
+  assert.deepEqual(
+    renderedStatuses(),
+    [[liveChip('statusRunning', 1)]],
+    'and the first whole minute appears'
+  )
+  tap('Escape')
+})
+
+check('a press on a heading switches nothing and moves nothing', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'folder one', path: 'G:\\work\\one', sessionIds: ['a'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'old', displayTitle: 'old', updatedAt: ago(30) },
+  ])
+  tap('f')
+  opened.length = 0
+  const heading = listNodes().find((node) => node.__attrs['data-session-id'] === undefined)
+  assert.ok(heading, 'a heading is on screen')
+  fireOn(heading, 'mousedown', { preventDefault() {}, stopPropagation() {} })
+  assert.deepEqual(opened, [], 'a heading is not a conversation to travel to')
+  assert.equal(fakeWindow.__dshVim.palette().index, 0, 'and it is not a row the selection can land on')
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'the window stays up')
+  tap('Escape')
+})
+
+check('a conversation pulled into the window is kept, and the order is recency', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'first', path: 'G:\\work\\first', sessionIds: ['a', 'old'] },
+    { workspaceId: 'w2', title: 'second', path: 'G:\\work\\second', sessionIds: ['b'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'b', updatedAt: ago(2) },
+    { id: 'old', displayTitle: 'the one I am in', updatedAt: ago(40), retainedBy: { mainView: 1 } },
+  ])
+  tap('f')
+  // The pull-in must not become a new sort key: the list is ordered by recency,
+  // and "where I am" is added to the block without being moved to the front of
+  // it — or the list would reshuffle every time the reader switched.
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['a', 'b', 'old'],
+    'the pulled-in row is loaded without jumping the queue'
+  )
+  assert.deepEqual(
+    sectionNames(),
+    [expectedLabel('groupRecent')],
+    'it joins the browsing block, which keeps its one heading'
+  )
+  assert.equal(fakeWindow.__dshVim.palette().rows[2].id, 'old', 'and the selection lands on it')
+  tap('Escape')
+})
+
+check('the task window reports its own blocks to the console', () => {
+  // Two lists, with two shapes: the task window is cut into attention blocks
+  // plus one browsing block, and the model picker is a flat list. The debug
+  // readout names the blocks so the cut can be read without counting elements —
+  // a heading is not a row, and the selection index counts conversations only.
+  registry.publish([], [{ workspaceId: 'w1', title: 'folder', path: 'G:\\work\\one', sessionIds: ['a'] }])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'old', displayTitle: 'old', updatedAt: ago(30) },
+  ])
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.deepEqual(
+    state.sections.map((section) => section.kind),
+    ['recent', 'more'],
+    'block by block, heading by heading'
+  )
+  assert.equal(state.sections[0].label, expectedLabel('groupRecent'), 'the browsing block names itself, not a folder')
+  assert.deepEqual(state.sections[0].ids, ['a'], 'and says which conversations it holds')
+  assert.equal(state.sections[0].count, 1, 'a block counts its rows')
+  assert.equal(state.sections[1].label, expectedLabel('groupMore'), 'the other block is the More seat')
+  assert.equal(state.sections[1].count, 1, 'which counts what is still behind it')
+  assert.deepEqual(state.sections[1].ids, [], 'and holds nothing yet')
+  tap('Escape')
+})
+
+check('opening the window does not reorder a folder for the row you are in', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'folder', path: 'G:\\work\\one', sessionIds: ['a', 'b', 'c'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'newest', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'middle', updatedAt: ago(2) },
+    { id: 'c', displayTitle: 'oldest and current', updatedAt: ago(3), retainedBy: { mainView: 1 } },
+  ])
+  tap('f')
+  const state = fakeWindow.__dshVim.palette()
+  assert.deepEqual(state.rows.map((r) => r.id), ['a', 'b', 'c'], 'recency holds, inside the folder')
+  assert.equal(state.index, 2, 'the selection is the row you are in, at the bottom')
+  assert.ok(hereChip(rowNodes()[2]), 'and the chip marks it there')
   tap('Escape')
 })
 
@@ -3160,7 +4017,7 @@ check('the window keeps the scroll keys wherever the pointer is parked', () => {
   tap('Escape')
 })
 
-check('the overlay lets the page behind it be used', () => {
+check('a press beside the window puts it away, and the page still gets the press', () => {
   seed([{ id: 'a', displayTitle: 'a', updatedAt: 1000 }])
   tap('f')
   const host = body.children[body.children.length - 1]
@@ -3168,10 +4025,96 @@ check('the overlay lets the page behind it be used', () => {
   assert.equal(card.getAttribute('role'), 'dialog', 'the card is the dialog, not the backdrop')
   assert.equal(host.style.pointerEvents, 'none', 'the backdrop must not swallow clicks meant for the page')
   assert.equal(card.style.pointerEvents, 'auto', 'while the card itself stays clickable')
-  // A click on the backdrop is a click on the page now: it must not close it.
-  fireOn(host, 'mousedown', { type: 'mousedown', target: host })
-  assert.equal(fakeWindow.__dshVim.palette().open, true, 'clicking beside the window leaves it open')
-  tap('Escape')
+  assert.deepEqual(host.__listeners, {}, 'and the backdrop carries no handler of its own')
+  // A click on the backdrop is a click on the page, so it reaches the page — and
+  // the window, which the press was aimed past, goes with it.
+  let swallowed = false
+  fire('pointerdown', {
+    type: 'pointerdown',
+    target: host,
+    button: 0,
+    preventDefault() {
+      swallowed = true
+    },
+    stopPropagation() {
+      swallowed = true
+    },
+  })
+  assert.equal(swallowed, false, 'the plugin must not swallow the press: the page still gets it')
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'and the window goes away with it')
+  assert.equal(body.children.length, 0, 'which unmounts it')
+})
+
+check('a press on the card is the window talking, not a way out', () => {
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: 2000 },
+    { id: 'b', displayTitle: 'b', updatedAt: 1000 },
+  ])
+  tap('f')
+  const at = fakeWindow.__dshVim.palette().index
+  press(cardNode())
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'the card is the window')
+  assert.equal(fakeWindow.__dshVim.palette().index, at, 'and a press on it moves nothing')
+  press(rowNodes()[0])
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'a row on the card is inside it too')
+  press(body)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'while the page beside the card is not')
+})
+
+check('a press outside the task window closes it wherever it lands', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: 1000 }])
+  tap('f')
+  // The sidebar is the page too: a press there still closes the window, and the
+  // host's own click on it is not ours to stop.
+  press(sidebar)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'the sidebar is outside the card')
+  assert.equal(body.children.length, 0, 'and the window unmounts')
+  tap('f')
+  press(transcript)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'and so is the conversation')
+  assert.equal(body.children.length, 0, 'either way it is gone')
+})
+
+check('a right-button press outside leaves the window alone', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: 1000 }])
+  tap('f')
+  // A right-click is asking the page for a menu; a window that vanished under it
+  // would take the selection the menu was about to act on with it.
+  fire('pointerdown', { type: 'pointerdown', target: transcript, button: 2 })
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'only the main button is a way out')
+  fire('pointerdown', { type: 'pointerdown', target: transcript, button: 1 })
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'and the middle button is not one either')
+  press(transcript)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'while the main button still is')
+})
+
+check('a press outside with a half-typed name closes the window and drops the name', () => {
+  seed([{ id: 'a', displayTitle: 'keep me', updatedAt: ago(1) }])
+  tap('f')
+  tap('r')
+  const box = renameBox()
+  assert.ok(box, 'the row must be renaming')
+  typeIn(box, 'half typed')
+  // The name box is on the card, so a press in it is not a way out — otherwise
+  // clicking into the name to fix a character would throw the name away.
+  press(box)
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'a press in the name box is inside')
+  assert.equal(renameBox(), box, 'and the draft is still being typed')
+  press(transcript)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'a press outside closes, as Escape does at the window')
+  assert.equal(renameBox(), null, 'and the half-typed name goes with it')
+  assert.deepEqual(renames.calls, [], 'nothing is ever sent for a name nobody finished')
+})
+
+check('a press on the page changes nothing when no window is open', () => {
+  assert.equal(fakeWindow.__dshVim.palette().open, false)
+  assert.equal(fakeWindow.__dshVim.modelPick().open, false)
+  press(transcript)
+  press(sidebar)
+  press(editor)
+  assert.equal(body.children.length, 0, 'no window may open itself on a press')
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'and none of them opened on the way')
+  assert.equal(fakeWindow.__dshVim.modelPick().open, false, 'either kind')
 })
 
 check('a running conversation is marked, and the window is real DOM', () => {
@@ -3183,11 +4126,14 @@ check('a running conversation is marked, and the window is real DOM', () => {
   const host = body.children[body.children.length - 1]
   assert.ok(host, 'the window must be appended to the body')
   const list = host.children[0].children[1]
-  assert.equal(list.children.length, 2, 'one row per conversation')
-  assert.equal(list.children[0].getAttribute('data-session-id'), 'a')
-  assert.equal(list.children[0].getAttribute('aria-selected'), 'true', 'the selected row is announced')
-  assert.equal(list.children[1].getAttribute('aria-selected'), 'false')
-  assert.ok(list.children[0].textContent.includes('busy one'))
+  // The list carries a heading above the "in flight" block now, so "one row per
+  // conversation" is counted on the rows, not on the list's raw children.
+  const rows = rowNodes()
+  assert.equal(rows.length, 2, 'one row per conversation')
+  assert.equal(rows[0].getAttribute('data-session-id'), 'a')
+  assert.equal(rows[0].getAttribute('aria-selected'), 'true', 'the selected row is announced')
+  assert.equal(rows[1].getAttribute('aria-selected'), 'false')
+  assert.ok(list.textContent.includes('busy one'))
   tap('Escape')
   assert.equal(body.children.length, 0, 'closing must unmount the window')
 })
@@ -3353,6 +4299,45 @@ check('the box never takes the keyboard by itself, however long it waits', () =>
   clock.advance(30000)
   shellFocus(editor)
   assert.equal(editorBlurs, 2, 'and it holds for the end of a turn too')
+})
+
+check('a clipboard tool that brings the window forward keeps the caret', () => {
+  // Ditto and the dictation tools work by bringing this window to the front and
+  // then *typing* Ctrl+V — they never click into the box. The focus that lands
+  // there is theirs, a side effect of the return, and it has to survive long
+  // enough for the key they are about to press; refusing it is what made the
+  // automatic paste land nowhere while a manual Ctrl+V still worked.
+  blurWindow()
+  refocusWindow()
+  shellFocus(editor)
+  assert.equal(editorBlurs, 0, 'the box keeps the caret the tool is about to paste into')
+  assert.equal(fakeDocument.activeElement, editor, 'which is where the paste goes')
+  // The key itself is a chord, so the plugin never claims it.
+  assert.equal(keydown('v', { target: editor, ctrlKey: true }), false, 'Ctrl+V is left to the host')
+})
+
+check('a focus long after the return is still given back', () => {
+  // The licence is for the moment of returning, not for the rest of the session:
+  // the shell's render effect reaching for the box a while later is the same
+  // rule as ever.
+  blurWindow()
+  refocusWindow()
+  clock.advance(2000)
+  shellFocus(editor)
+  assert.equal(editorBlurs, 1, 'a late focus is not the tail of the return')
+  assert.equal(fakeDocument.activeElement, body, 'so the scroll keys stay live')
+})
+
+check('the returned window does not license the box forever', () => {
+  // One return, one grace: a focus arriving without a return of its own still
+  // meets the standing rule, so the "your fingers get it back" promise holds.
+  blurWindow()
+  refocusWindow()
+  shellFocus(editor)
+  assert.equal(editorBlurs, 0, 'the tool keeps the caret it asked for')
+  clock.advance(2000)
+  shellFocus(editor)
+  assert.equal(editorBlurs, 1, 'the next unrequested focus is refused again')
 })
 
 // --- what a send does to the keyboard ---------------------------------------
@@ -4028,44 +5013,69 @@ function modelPickRows() {
 }
 
 /**
- * One cell of a picker row, by the role it carries.
+ * One node of a picker row, by the role it carries.
  *
- * Read by role rather than by position: the tag leads the row now, and a check
- * that counted children would silently read the wrong cell the next time the
- * row is reordered — which is exactly the kind of quiet breakage a suite is
- * supposed to catch.
+ * Read by role rather than by position, and searched over the whole row: the
+ * `current` tag and the name share the name cell, so their roles are nested a
+ * level down. A check that counted children would silently read the wrong node
+ * the next time the row is reshaped — which is exactly the kind of quiet
+ * breakage a suite is supposed to catch.
  * @param {object} row - a picker row.
- * @param {string} role - `here`, `name`, `levels` or `provider`.
- * @returns {object|null} the cell.
+ * @param {string} role - `here`, `name`, `nameText`, `levels`, `provider`, `level` or `landed`.
+ * @returns {object|null} the node.
  */
 function modelPickCell(row, role) {
-  return row.children.find((cell) => cell.getAttribute('data-role') === role) ?? null
+  const walk = (node) => {
+    for (const child of node.children ?? []) {
+      if (child.getAttribute('data-role') === role) return child
+      const found = walk(child)
+      if (found) return found
+    }
+    return null
+  }
+  return walk(row)
 }
 
 /**
  * The model name printed on each picker row.
  *
- * The tag is a cell of its own ahead of the name, so the name is read by role.
+ * The `current` tag shares the name cell, so the name is that cell's own span.
  */
 function modelPickNames() {
-  return modelPickRows().map((row) => modelPickCell(row, 'name').textContent)
+  return modelPickRows().map((row) => modelPickCell(row, 'nameText').textContent)
 }
 
 /** Whether a picker row carries the `current` tag. */
 function modelPickRowIsHere(row) {
-  const cell = modelPickCell(row, 'here')
-  return !!cell && cell.textContent === expectedLabel('modelPickHere')
+  const tag = row.children[0].children.find((cell) => cell.getAttribute('data-role') === 'here')
+  return !!tag && tag.textContent === expectedLabel('modelPickHere')
 }
 
 /**
  * The level chips of one picker row, in order.
  *
- * The level cell holds one chip per published level, or a single dim word when
- * the model publishes none.
+ * Only the selected row draws chips; every other row carries a single landing
+ * level instead, and answers with an empty list here.
+ * @param {object} row - a picker row.
+ * @returns {Array} the chips.
  */
 function modelPickLevelChips(row) {
   const cell = modelPickCell(row, 'levels')
-  return cell ? cell.children.slice() : []
+  if (!cell) return []
+  return cell.children.filter((chip) => chip.getAttribute('data-role') === 'level')
+}
+
+/**
+ * The level an unselected row says it would land on, or null when the row draws
+ * chips (or says it has none).
+ * @param {object} row - a picker row.
+ * @returns {string|null} the landing level's name.
+ */
+function modelPickLanded(row) {
+  const cell = modelPickCell(row, 'levels')
+  if (!cell) return null
+  const land = cell.children.find((chip) => chip.getAttribute('data-role') === 'landed')
+  return land ? land.textContent : null
 }
 
 /** The level names drawn on one picker row. */
@@ -4137,28 +5147,46 @@ await checkAsync('the picker opens on the model in effect and tags it', async ()
   const rows = modelPickRows()
   assert.ok(modelPickRowIsHere(rows[2]), 'and that row carries the tag')
   assert.ok(!modelPickRowIsHere(rows[0]), 'no other row does')
-  // The tag leads the row, so the name is read by role rather than position.
-  assert.equal(modelPickCell(rows[2], 'name').textContent, 'Space Bunny Free', 'the tagged row names its model')
+  // The tag rides inside the name cell, in front of the name.
   assert.equal(
-    modelPickCell(rows[0], 'here').textContent,
-    '',
-    'an untagged row still holds the tag column open, so the names line up'
+    modelPickCell(rows[2], 'nameText').textContent,
+    'Space Bunny Free',
+    'the tagged row names its model'
   )
-  assert.equal(modelPickCell(rows[0], 'name').textContent, 'DeepSeek Chat', 'a row names its model')
-  assert.equal(modelPickCell(rows[0], 'provider').textContent, 'deepseek', 'and names its provider')
-  // The tag comes first in document order, ahead of the name.
   assert.equal(
-    rows[2].children[0].getAttribute('data-role'),
+    rows[2].children[0].children[0].getAttribute('data-role'),
     'here',
-    'the current tag leads the row'
+    'the tag leads the name inside its cell'
   )
-  assert.equal(rows[2].children[1].getAttribute('data-role'), 'name', 'and the name follows it')
+  assert.equal(
+    rows[2].children[0].children[1].getAttribute('data-role'),
+    'nameText',
+    'and the name follows it'
+  )
+  assert.equal(
+    rows[0].children[0].children.length,
+    1,
+    'an untagged row carries no tag, rather than an empty one holding the column'
+  )
+  assert.equal(modelPickCell(rows[0], 'nameText').textContent, 'DeepSeek Chat', 'a row names its model')
+  assert.equal(modelPickCell(rows[0], 'provider').textContent, 'deepseek', 'and names its provider')
+  // The row is three cells: name, levels, provider.
   assert.deepEqual(
-    modelPickLevelNames(rows[0]),
-    [expectedLabel('modelPickNoLevel')],
-    'a model that publishes no levels says so rather than showing an empty cell'
+    rows[0].children.map((c) => c.getAttribute('data-role')),
+    ['name', 'levels', 'provider'],
+    'a row is name, levels, provider'
   )
-  assert.deepEqual(modelPickLevelNames(rows[1]), ['低', '中', '高'], 'every level of a model is listed')
+  // A model that publishes no levels says so; the selected row draws its chips.
+  assert.deepEqual(
+    modelPickLevelNames(rows[2]),
+    [],
+    'the row with no levels draws no chips'
+  )
+  assert.equal(
+    modelPickCell(rows[2], 'levels').textContent,
+    expectedLabel('modelPickNoLevel'),
+    'and says so in words instead of showing an empty cell'
+  )
 })
 
 await checkAsync('d and e move the selection and wrap at both ends', async () => {
@@ -4187,27 +5215,192 @@ await checkAsync('every level is laid out flat on one line', async () => {
   MODEL.publish({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'medium' })
   tap('w')
   await flush()
-  const cell = modelPickCell(modelPickRows()[1], 'levels')
+  const row = modelPickRows()[1]
+  const cell = modelPickCell(row, 'levels')
   assert.ok(cell, 'the level cell must be on the row')
   assert.equal(cell.style.display, 'flex', 'the levels are a flex row')
   assert.equal(cell.style.flexWrap, 'nowrap', 'and they must not wrap onto a second line')
   assert.equal(cell.style.justifyContent, 'flex-start', 'they pack from the start of the leftover width')
   assert.equal(cell.style.minWidth, '0', 'the cell may shrink rather than push the provider off the row')
-  // The row itself is one line of cells, in the order the eye reads them.
-  const row = modelPickRows()[1]
+  // The cell clips what does not fit: a level that cannot fit is a cheaper thing
+  // to lose than the provider column, which is also a fact about the row.
+  assert.equal(cell.style.overflow, 'hidden', 'the level cell clips its own overflow')
+  for (const chip of modelPickLevelChips(row)) {
+    assert.equal(chip.style.flex, '0 0 auto', 'a chip must not be squeezed by the cell shrinking')
+  }
+  // The levels track must be able to shrink. A bare `1fr` carries an automatic
+  // minimum of its content's min-content width, and a non-wrapping level row's
+  // min-content is every chip added together — the track would refuse to shrink,
+  // the row would overrun the card, and the card's overflow would eat the
+  // provider column.
+  assert.equal(
+    row.style.gridTemplateColumns,
+    'minmax(0, auto) minmax(0, 1fr) auto',
+    'the levels track is a shrinkable 1fr, so the row cannot overrun the card'
+  )
+  // The row is three cells in the order the eye reads them.
   assert.deepEqual(
     row.children.map((c) => c.getAttribute('data-role')),
-    ['here', 'name', 'levels', 'provider'],
-    'the row reads tag, name, levels, provider'
+    ['name', 'levels', 'provider'],
+    'the row reads name, levels, provider'
   )
-  // A row that is not the current one holds the tag column open with a blank,
-  // so the name still starts at the same x.
+  // Only the selected row draws its whole scale; the rest say where they land.
+  assert.deepEqual(modelPickLevelNames(row), ['低', '中', '高'], 'the selected row lists every level')
+  assert.equal(
+    modelPickLanded(modelPickRows()[0]),
+    expectedLabel('modelPickNoLevel'),
+    'a row with no levels says so on any row'
+  )
+  // Move down to Space Bunny Free: the row just left stops listing its scale,
+  // and the newly selected row says where it would land instead.
+  tap('d')
+  assert.equal(modelPickSelected(), 2, 'on the row that publishes no levels')
+  assert.equal(
+    modelPickLanded(modelPickRows()[1]),
+    '中',
+    'the row left behind names the level it would land on instead of listing them'
+  )
+  assert.deepEqual(modelPickLevelNames(modelPickRows()[1]), [], 'and draws no chips')
+  assert.equal(
+    modelPickLanded(modelPickRows()[2]),
+    expectedLabel('modelPickNoLevel'),
+    'the newly selected row says it has no levels'
+  )
+  tap('Escape')
+})
+
+await checkAsync('an unselected row says only which level it would land on', async () => {
+  seedVisible()
+  MODEL.offer(CATALOG)
+  useFavorites([{ provider: 'deepseek', model: 'deepseek-reasoner' }, { provider: 'deepseek', model: 'deepseek-chat' }])
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'medium' })
+  tap('w')
+  await flush()
+  // On the reasoner, with `high` in effect: it lists its whole scale.
+  assert.deepEqual(modelPickLevelNames(modelPickRows()[0]), ['低', '中', '高'], 'the selected row lists its levels')
+  assert.equal(modelPickLevelOn(modelPickRows()[0]), '中', 'with the one in effect lit')
+  // Move to the chat model, which publishes none, and back: the reasoner now
+  // says where it would land instead of listing everything.
+  tap('d')
+  assert.deepEqual(modelPickLevelNames(modelPickRows()[0]), [], 'the row left behind draws no chips')
+  assert.equal(
+    modelPickLanded(modelPickRows()[0]),
+    '中',
+    'it names the level it would land on instead'
+  )
+  tap('e')
+  assert.deepEqual(modelPickLevelNames(modelPickRows()[0]), ['低', '中', '高'], 'and the row chosen again lists them all')
+  assert.equal(modelPickLanded(modelPickRows()[0]), null, 'with no landing word beside them')
+  tap('Escape')
+})
+
+await checkAsync('Shift with a movement key reorders the row, and the order is remembered', async () => {
+  seedVisible()
+  MODEL.offer(CATALOG)
+  useFavorites(FAVORITES)
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-chat' })
+  tap('w')
+  await flush()
+  assert.deepEqual(modelPickNames(), ['DeepSeek Chat', 'DeepSeek Reasoner', 'Space Bunny Free'], 'the list starts in its configured order')
+  // Shift + down moves the row itself, and the selection stays on the model.
+  tap('d', { shiftKey: true })
   assert.deepEqual(
-    modelPickRows()[0].children.map((c) => c.getAttribute('data-role')),
-    ['here', 'name', 'levels', 'provider'],
-    'an untagged row keeps the same four columns'
+    modelPickNames(),
+    ['DeepSeek Reasoner', 'DeepSeek Chat', 'Space Bunny Free'],
+    'the row moved down one place'
   )
-  assert.equal(modelPickRows()[0].children[0].textContent, '', 'with an empty tag cell')
+  assert.equal(modelPickSelected(), 1, 'and the selection stayed on the model that moved')
+  assert.deepEqual(
+    fakeWindow.__dshVim.settings().favorites.slice(0, 3),
+    [
+      { provider: 'deepseek', model: 'deepseek-reasoner' },
+      { provider: 'deepseek', model: 'deepseek-chat' },
+      { provider: 'bunny', model: 'bunny-free' },
+    ],
+    'and the order was written into the configured list the settings page shows'
+  )
+  // Shift + up puts it back. The ends refuse rather than wrapping: a row being
+  // pushed off the end of the list should stay where it is.
+  tap('d', { shiftKey: true })
+  assert.deepEqual(modelPickNames(), ['DeepSeek Reasoner', 'Space Bunny Free', 'DeepSeek Chat'], 'moved down again')
+  assert.equal(modelPickSelected(), 2, 'the bottom row is now selected')
+  tap('d', { shiftKey: true })
+  assert.deepEqual(
+    modelPickNames(),
+    ['DeepSeek Reasoner', 'Space Bunny Free', 'DeepSeek Chat'],
+    'and a move past the end changes nothing'
+  )
+  tap('e', { shiftKey: true })
+  assert.deepEqual(modelPickNames(), ['DeepSeek Reasoner', 'DeepSeek Chat', 'Space Bunny Free'], 'Shift + up moves the row back up')
+  // A reorder submits nothing: it is a list edit, not a switch.
+  assert.deepEqual(MODEL.calls, [], 'reordering must not switch the model')
+  tap('Escape')
+  assert.deepEqual(
+    fakeWindow.__dshVim.settings().favorites.slice(0, 3),
+    [
+      { provider: 'deepseek', model: 'deepseek-reasoner' },
+      { provider: 'deepseek', model: 'deepseek-chat' },
+      { provider: 'bunny', model: 'bunny-free' },
+    ],
+    'and the order survives the window closing'
+  )
+  // Reopening shows the same order.
+  tap('w')
+  await flush()
+  assert.deepEqual(
+    modelPickNames(),
+    ['DeepSeek Reasoner', 'DeepSeek Chat', 'Space Bunny Free'],
+    'so the next time the window opens, the list is as it was left'
+  )
+  tap('Escape')
+  reset()
+})
+
+await checkAsync('a model the catalog dropped out keeps its place when the list is reordered', async () => {
+  seedVisible()
+  // The list holds a model the catalog does not offer, the way a signed-out
+  // provider leaves one behind.
+  MODEL.offer([
+    { id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat' }] },
+  ])
+  useFavorites([
+    { provider: 'deepseek', model: 'deepseek-chat' },
+    { provider: 'gone', model: 'vanished' },
+  ])
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-chat' })
+  tap('w')
+  await flush()
+  assert.deepEqual(modelPickNames(), ['DeepSeek Chat'], 'only what the catalog offers is on screen')
+  tap('d', { shiftKey: true })
+  assert.deepEqual(
+    fakeWindow.__dshVim.settings().favorites,
+    [
+      { provider: 'deepseek', model: 'deepseek-chat' },
+      { provider: 'gone', model: 'vanished' },
+    ],
+    'the unavailable model keeps its place: a reorder is not an edit of a row nobody was looking at'
+  )
+  tap('Escape')
+})
+
+await checkAsync('the window keeps one width, whatever the selection is on', async () => {
+  seedVisible()
+  MODEL.offer(CATALOG)
+  useFavorites(FAVORITES)
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-chat' })
+  tap('w')
+  await flush()
+  const panel = modelPickPanel()
+  assert.equal(panel.style.width, 'min(680px, 92vw)', 'the card is one width rather than one per list')
+  assert.equal(panel.style.minWidth, undefined, 'with no lower bound that a long name could grow past')
+  assert.equal(panel.style.maxWidth, undefined, 'and no content-driven upper bound either')
+  // The width must not be a number that changes when the levels change: moving
+  // onto a model with a different scale has to leave the card exactly as wide.
+  const before = panel.style.width
+  tap('d')
+  assert.equal(modelPickPanel().style.width, before, 'moving onto a model with levels leaves it as wide')
+  tap('d')
+  assert.equal(modelPickPanel().style.width, before, 'and moving onto one without them too')
   tap('Escape')
 })
 
@@ -4544,7 +5737,7 @@ await checkAsync('the picker names the live keys rather than letters it assumes'
   reset()
 })
 
-await checkAsync('every level of every model is listed, with the one in effect lit', async () => {
+await checkAsync('the selected row lists its levels with the one in effect lit', async () => {
   seedVisible()
   MODEL.offer(CATALOG)
   useFavorites(FAVORITES)
@@ -4552,13 +5745,17 @@ await checkAsync('every level of every model is listed, with the one in effect l
   tap('w')
   await flush()
   const rows = modelPickRows()
-  assert.deepEqual(modelPickLevelNames(rows[0]), [expectedLabel('modelPickNoLevel')], 'a model with no levels says so')
+  // The window opens on the model in effect, so it is the selected row and the
+  // one carrying the whole scale.
   assert.deepEqual(modelPickLevelNames(rows[1]), ['低', '中', '高'], 'all three levels of the model in effect are drawn')
   assert.equal(modelPickLevelOn(rows[1]), '中', 'and the one in effect is the lit one')
-  // The row the conversation is not on shows where it would land instead: it
-  // publishes no `high`, so the carry-over cannot happen and its own default is
-  // the landing place.
-  assert.equal(modelPickLevelOn(rows[0]), null, 'a model with no levels has nothing lit')
+  // A row with no levels says so wherever it sits.
+  assert.equal(
+    modelPickCell(rows[0], 'levels').textContent,
+    expectedLabel('modelPickNoLevel'),
+    'a model with no levels says so in words'
+  )
+  assert.equal(modelPickLanded(rows[0]), expectedLabel('modelPickNoLevel'), 'and names no landing level')
   tap('Escape')
 })
 
@@ -4679,8 +5876,12 @@ await checkAsync('clicking a level chip switches to that model at that level in 
   MODEL.publish({ provider: 'deepseek', model: 'deepseek-chat' })
   tap('w')
   await flush()
+  // Only the selected row draws chips, so move onto the model that has them
+  // before reaching for one — a pointer and a key reach the same row.
+  tap('d')
+  assert.equal(modelPickSelected(), 1, 'on the model with levels')
   const chips = modelPickLevelChips(modelPickRows()[1])
-  assert.equal(chips.length, 3, 'the model with levels must offer three chips')
+  assert.equal(chips.length, 3, 'the selected row must offer three chips')
   const handlers = chips[2].__listeners.click ?? []
   assert.equal(handlers.length, 1, 'each chip must carry its own click handler')
   let stopped = false
@@ -4748,9 +5949,10 @@ await checkAsync('a rebound level key is the one that steps, and Tab goes back t
   assert.equal(modelPickFooter().includes('Tab'), false, 'and not the one it no longer is')
   tap('Tab')
   assert.equal(modelPickSelected(), 2, 'Tab moves the row again, as it did before the level seat existed')
-  assert.equal(modelPickLevelOn(modelPickRows()[1]), '中', 'and it did not step that level')
+  assert.deepEqual(MODEL.calls, [], 'and steps nothing')
   tap('e')
   assert.equal(modelPickSelected(), 1, 'back on the model with levels')
+  assert.equal(modelPickLevelOn(modelPickRows()[1]), '中', 'whose level is where it was')
   tap('n')
   assert.equal(modelPickLevelOn(modelPickRows()[1]), '高', 'and the rebound key is the one that steps')
   tap('Escape')
@@ -4801,7 +6003,7 @@ await checkAsync('the level key cannot collide with the keys the window shares',
   reset()
 })
 
-await checkAsync('the reasoning key stands down while the picker is up', async () => {
+await checkAsync('the reasoning key steps the level inside the window, not behind it', async () => {
   seedVisible()
   MODEL.offer(CATALOG)
   useFavorites(FAVORITES)
@@ -4812,13 +6014,65 @@ await checkAsync('the reasoning key stands down while the picker is up', async (
   await flush()
   const before = MODEL.calls.length
   tap('q')
-  assert.equal(MODEL.calls.length, before, 'q must not change the level behind a window that is drawing it')
-  assert.equal(modelPickLevelOn(modelPickRows()[1]), '中', 'and the mark must not go stale')
-  tap('Escape')
+  assert.deepEqual(
+    MODEL.calls.length,
+    before,
+    'q must not submit while the window is still choosing: it moves the mark'
+  )
+  assert.equal(modelPickLevelOn(modelPickRows()[1]), '高', 'and the mark moves one notch on, as q always means')
+  tap('q')
+  assert.equal(modelPickLevelOn(modelPickRows()[1]), '低', 'every press is still one step')
+  assert.deepEqual(MODEL.calls.length, before, 'and nothing is submitted until the window confirms')
+  // Confirming takes the mark with it: the level the window was showing is the
+  // level the session lands on.
+  tap('w')
+  await flush()
+  assert.deepEqual(
+    MODEL.calls[before],
+    { provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' },
+    'the level the mark reached is submitted with the model'
+  )
   tap('q')
   await flush()
-  assert.equal(MODEL.calls.length, before + 1, 'with the window down the reasoning key works again')
-  assert.equal(MODEL.calls[before].reasoningEffort, 'high', 'and it steps from the level the window was showing')
+  assert.equal(MODEL.calls.length, before + 2, 'and with the window down q steps the session again')
+})
+
+await checkAsync('a press outside the model window cancels it, as Escape does', async () => {
+  seedVisible()
+  MODEL.offer(CATALOG)
+  useFavorites(FAVORITES)
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'medium' }, REASONING)
+  tap('w')
+  await flush()
+  assert.equal(fakeWindow.__dshVim.modelPick().open, true, 'the picker must be up')
+  const before = MODEL.calls.length
+  press(cardNode())
+  assert.equal(fakeWindow.__dshVim.modelPick().open, true, 'a press on its own card is inside the window')
+  press(transcript)
+  assert.equal(fakeWindow.__dshVim.modelPick().open, false, 'a press beside it cancels the way out')
+  assert.equal(body.children.length, 0, 'and the picker unmounts')
+  assert.equal(MODEL.calls.length, before, 'cancelling submits nothing, exactly as Escape does')
+})
+
+await checkAsync('a window on the card of another keeps both of them up', async () => {
+  seedVisible()
+  MODEL.offer(CATALOG)
+  useFavorites(FAVORITES)
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'medium' }, REASONING)
+  tap('f')
+  tap('w')
+  await flush()
+  // Both can be on the page at once, and the picker's card is the one the press
+  // lands on: a press inside one window is not a press outside the other.
+  assert.equal(fakeWindow.__dshVim.palette().open, true)
+  assert.equal(fakeWindow.__dshVim.modelPick().open, true)
+  press(cardNode())
+  assert.equal(fakeWindow.__dshVim.palette().open, true, 'the task window stays')
+  assert.equal(fakeWindow.__dshVim.modelPick().open, true, 'and so does the picker')
+  press(transcript)
+  assert.equal(fakeWindow.__dshVim.palette().open, false, 'a press that misses both takes both down')
+  assert.equal(fakeWindow.__dshVim.modelPick().open, false, 'the task window and the picker alike')
+  assert.equal(body.children.length, 0, 'and neither outlives it')
 })
 
 await checkAsync('the model key can be rebound, and cannot collide with the page keys', () => {
@@ -5081,12 +6335,14 @@ check('the active position toggle is marked pressed', () => {
  * Found by the state labels rather than by "any coloured cell": the stage chip
  * sits in the same strip, an idle stage has a colour of its own, and a filter
  * on colour would start reporting the stage as the status.
+ *
+ * Read through `rowNodes`, not the list's own children: the list now carries a
+ * heading above each attention block, and walking the raw children would count
+ * a heading as a row and report a phantom entry per block.
  * @returns {Array<Array<string>>} one array of labels per row.
  */
 function renderedStatuses() {
-  const host = body.children[body.children.length - 1]
-  const list = host.children[0].children[1]
-  return list.children.map((row) => {
+  return rowNodes().map((row) => {
     const chip = stateChip(row)
     return chip ? [chip.textContent] : []
   })
@@ -5094,25 +6350,24 @@ function renderedStatuses() {
 
 /**
  * How the row clock writes a duration, in the harness locale.
- * @param {number} minutes - whole minutes.
- * @param {number} seconds - whole seconds.
+ *
+ * Minutes are the whole resolution now: the chip has no seconds to show, and a
+ * turn inside its first minute shows no duration at all.
+ * @param {number} minutes - whole minutes elapsed.
  * @returns {string} the label the plugin should have painted.
  */
-function elapsedLabel(minutes, seconds) {
-  return minutes
-    ? minutes + expectedLabel('elapsedMinutes') + seconds + expectedLabel('elapsedSeconds')
-    : seconds + expectedLabel('elapsedSeconds')
+function elapsedLabel(minutes) {
+  return minutes + expectedLabel('elapsedMinutes')
 }
 
 /**
  * The text of a state chip that carries a clock: the state, then the duration.
  * @param {string} key - the state's dictionary key.
  * @param {number} minutes - whole minutes elapsed.
- * @param {number} seconds - whole seconds elapsed.
  * @returns {string} the label the plugin should have painted.
  */
-function liveChip(key, minutes, seconds) {
-  return expectedLabel(key) + ' · ' + elapsedLabel(minutes, seconds)
+function liveChip(key, minutes) {
+  return expectedLabel(key) + ' · ' + elapsedLabel(minutes)
 }
 
 check('each conversation shows what it is doing right now', () => {
@@ -5120,7 +6375,7 @@ check('each conversation shows what it is doing right now', () => {
     { id: 'running', displayTitle: 'in flight', updatedAt: ago(1) },
     { id: 'done', displayTitle: 'finished', updatedAt: ago(2) },
     { id: 'ask', displayTitle: 'needs me', updatedAt: ago(3) },
-    { id: 'quiet', displayTitle: 'idle', updatedAt: ago(4) },
+    { id: 'quiet', displayTitle: 'idle', updatedAt: ago(2.5) },
   ])
   statusFeed.put('running', { running: true })
   statusFeed.put('done', { running: false, completionUnread: true })
@@ -5128,7 +6383,108 @@ check('each conversation shows what it is doing right now', () => {
   statusFeed.put('quiet', { running: false, completionUnread: false })
   tap('f')
   const labels = renderedStatuses()
-  assert.deepEqual(labels, [[expectedLabel('statusRunning')], [expectedLabel('statusDone')], [expectedLabel('statusWaitApproval')], []], 'one label per non-idle conversation, in list order')
+  // The list leads with what is waiting on the reader, then what is in flight,
+  // then the rest — so this is no longer recency's order. Inside the waiting
+  // block the oldest debt comes first, and neither of these two was watched
+  // starting, so `updatedAt` decides: `ask` was touched before `done`.
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['ask', 'done', 'running', 'quiet'],
+    'the attention blocks lead, and the idle row trails'
+  )
+  assert.deepEqual(
+    labels,
+    [[expectedLabel('statusWaitApproval')], [expectedLabel('statusDone')], [expectedLabel('statusRunning')], []],
+    'one label per non-idle conversation, in list order'
+  )
+  tap('Escape')
+})
+
+check('the just-finished chip draws the eye once when the window opens', () => {
+  seed([{ id: 'done', displayTitle: 'finished while I was away', updatedAt: ago(0.1) }])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  tap('f')
+  const chip = () => stateChip(rowNodes()[0])
+  assert.ok(chip(), 'the chip says "just done" before anything moves')
+  // The first frame is due on the next tick, so a little virtual time is what
+  // makes the beat visible — the same shape a real browser gives it.
+  clock.advance(180)
+  const swell = Number((String(chip().style.transform || '').match(/scale\(([\d.]+)\)/) || [])[1])
+  assert.ok(swell > 1, 'the chip swells so the eye lands on it')
+  assert.ok(
+    String(chip().style.boxShadow || '').includes('rgba(125, 211, 252'),
+    'and it wears a ring in the just-finished colour'
+  )
+  clock.advance(900)
+  assert.equal(chip().style.transform, '', 'when the beat is over the chip is back where it was')
+  assert.equal(chip().style.boxShadow, '', 'and nothing is left behind to dismiss')
+  tap('Escape')
+})
+
+check('reduced motion gets no beat at all', () => {
+  mediaReduce = true
+  seed([{ id: 'done', displayTitle: 'finished', updatedAt: ago(0.1) }])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  tap('f')
+  clock.advance(180)
+  assert.ok(
+    !stateChip(rowNodes()[0]).style.transform,
+    'the chip already says the fact in words; the beat is decoration on top of it'
+  )
+  assert.ok(!stateChip(rowNodes()[0]).style.boxShadow, 'and nothing else moves either')
+  tap('Escape')
+})
+
+check('only the just-finished chip beats', () => {
+  seed([
+    { id: 'done', displayTitle: 'finished', updatedAt: ago(0.5) },
+    { id: 'ask', displayTitle: 'waiting on you', updatedAt: ago(1) },
+    { id: 'busy', displayTitle: 'running', updatedAt: ago(2) },
+  ])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  statusFeed.put('ask', { running: false, pendingInteraction: { kind: 'approval' } })
+  statusFeed.put('busy', { running: true })
+  tap('f')
+  clock.advance(180)
+  const rows = rowNodes()
+  const order = fakeWindow.__dshVim.palette().rows.map((r) => r.id)
+  const chipFor = (id) => stateChip(rows[order.indexOf(id)])
+  assert.ok(String(chipFor('done').style.transform || '').includes('scale('), 'the one that just finished is the news')
+  assert.ok(!chipFor('ask').style.transform, 'a debt already on the list does not need pointing at')
+  assert.ok(!chipFor('busy').style.transform, 'nor does a run the reader is watching')
+  clock.advance(900)
+  tap('Escape')
+})
+
+check('a feed update does not restart the beat', () => {
+  const done = { id: 'done', displayTitle: 'finished', updatedAt: ago(0.1) }
+  seed([done])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  tap('f')
+  clock.advance(1000)
+  assert.ok(!stateChip(rowNodes()[0]).style.transform, 'the beat is over')
+  // A repaint arrives — the kind that used to be able to replay a cue tied to
+  // painting. It must land on a still chip: the beat answers "what changed while
+  // this window was closed", and it has already been answered.
+  seed([{ id: 'done', displayTitle: 'finished', updatedAt: ago(0.1) }])
+  clock.advance(180)
+  assert.ok(!stateChip(rowNodes()[0]).style.transform, 'a repaint must not fire it again')
+  tap('Escape')
+})
+
+check('a repaint in the middle of the beat keeps it on the new chips', () => {
+  seed([{ id: 'done', displayTitle: 'finished', updatedAt: ago(0.1) }])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  tap('f')
+  clock.advance(200)
+  const first = stateChip(rowNodes()[0])
+  assert.ok(String(first.style.transform || '').includes('scale('), 'the beat is running')
+  seed([{ id: 'done', displayTitle: 'finished', updatedAt: ago(0.1) }])
+  const rebuilt = stateChip(rowNodes()[0])
+  assert.notEqual(rebuilt, first, 'the repaint really did replace the chip node')
+  assert.ok(String(rebuilt.style.transform || '').includes('scale('), 'so the beat must continue on the replacement')
+  clock.advance(900)
+  assert.equal(rebuilt.style.transform, '', 'and end on it too')
   tap('Escape')
 })
 
@@ -5156,7 +6512,19 @@ check('a live status change repaints the open window', () => {
   tap('f')
   assert.deepEqual(renderedStatuses(), [[], []])
   statusFeed.put('b', { running: true })
-  assert.deepEqual(renderedStatuses(), [[], [expectedLabel('statusRunning')]], 'a finished run must appear live')
+  // `b` moves into the "in flight" block, which leads the list, so it is the
+  // first row now rather than the second. The point of the check is that the
+  // open window repaints at all, not where the row lands.
+  assert.deepEqual(
+    renderedStatuses(),
+    [[expectedLabel('statusRunning')], []],
+    'a finished run must appear live'
+  )
+  assert.deepEqual(
+    fakeWindow.__dshVim.palette().rows.map((r) => r.id),
+    ['b', 'a'],
+    'and it is the attention block that leads the list'
+  )
   tap('Escape')
   assert.equal(statusFeed.listeners.length, 1, 'the window lets go of the feed; the run watch stays')
 })
@@ -5174,23 +6542,27 @@ check('a running row shows how long it has been going', () => {
   tap('f')
   assert.deepEqual(
     renderedStatuses(),
-    [[liveChip('statusRunning', 1, 30)], []],
+    [[liveChip('statusRunning', 1)], []],
     'the clock rides inside the state chip, and an idle row carries neither'
   )
+  // The turn count is still out when the window opens, and the repaint that
+  // settles it rebuilds the list — its own behaviour, and not the tick's. Let it
+  // land first, so what follows is testing the tick and nothing else.
+  clock.advance(2000)
   const chip = stateChip(rowNodes()[0])
   assert.ok(chip, 'the running row carries a state chip')
-  assert.equal(chip.getAttribute('title'), expectedLabel('elapsedFor') + ' ' + elapsedLabel(1, 30))
+  assert.equal(chip.getAttribute('title'), expectedLabel('elapsedFor') + ' ' + elapsedLabel(1))
   assert.equal(
     fakeWindow.__dshVim.palette().rows[0].since > 0,
     true,
     'the debug API must expose the stamp the row is drawn from'
   )
-  // One second later, in place: a tick must not rebuild the list under the
-  // user's selection, nor under a half-typed rename.
-  clock.advance(1000)
+  // A minute later, in place: a tick must not rebuild the list under the user's
+  // selection, nor under a half-typed rename.
+  clock.advance(60 * 1000)
   assert.equal(
     chip.textContent,
-    liveChip('statusRunning', 1, 31),
+    liveChip('statusRunning', 2),
     'the chip ticks while the window is open'
   )
   assert.equal(
@@ -5213,9 +6585,12 @@ check('a new turn starts its clock over', () => {
   statusFeed.put('a', { running: true })
   clock.advance(10 * 1000)
   tap('f')
+  // Ten seconds in, there is no duration to show yet: the chip keeps the plain
+  // state rather than a count of seconds nobody acts on. The second turn is
+  // still its own, and is not charged for the first.
   assert.deepEqual(
     renderedStatuses(),
-    [[liveChip('statusRunning', 0, 10)], []],
+    [[expectedLabel('statusRunning')], []],
     'the second turn is not charged for the first'
   )
   // A turn parked on a question is the same turn waiting on the user: in
@@ -5223,9 +6598,11 @@ check('a new turn starts its clock over', () => {
   statusFeed.put('b', { running: false })
   statusFeed.put('b', { running: false, pendingInteraction: { kind: 'approval' } })
   clock.advance(5 * 1000)
+  // Both are in the attention blocks now, and `mine` leads: the parked question
+  // comes before the turn in flight, whatever the clock says.
   assert.deepEqual(
     renderedStatuses(),
-    [[liveChip('statusRunning', 0, 15)], [liveChip('statusWaitApproval', 0, 5)]],
+    [[expectedLabel('statusWaitApproval')], [expectedLabel('statusRunning')]],
     'a conversation waiting on a question keeps its own clock'
   )
   tap('Escape')
@@ -5244,6 +6621,10 @@ check('the columns on the right line up down the list', () => {
   statusFeed.put('col-a', { running: false })
   statusFeed.put('col-a', { running: true })
   statusFeed.put('col-b', { running: false, completionUnread: true })
+  // A minute in, so the clocked chip actually carries a duration: at minute
+  // resolution a fresh turn shows the plain state, and the two chips would be
+  // the same width for a reason this check is not about.
+  clock.advance(60 * 1000)
   tap('f')
   const rows = rowNodes()
   assert.equal(
@@ -5254,26 +6635,39 @@ check('the columns on the right line up down the list', () => {
   const tracks = rightTracks(rows[0])
   assert.match(
     tracks.join(' '),
-    /^\d+px \d+px \d+px \d+px$/,
-    'stage, state, turns and time are sized once for the list, not per row'
+    /^\d+px \d+px \d+px$/,
+    'stage, turns and time are sized once for the list, not per row'
   )
   const chips = rows.map((row) => stateChip(row))
-  assert.ok(chips[1].scrollWidth < chips[0].scrollWidth, 'the settled row has the narrower chip')
-  assert.equal(
-    tracks[1],
-    chips[0].scrollWidth + 'px',
-    'the state column is as wide as the widest state on screen'
+  // The settled row leads the list now, because it is the one waiting on the
+  // reader; the running row trails it. The two chips differ in width, which is
+  // the point — the column is fitted to the wider of them, not to each row.
+  const running = fakeWindow.__dshVim.palette().rows.findIndex((r) => r.id === 'col-a')
+  const settled = fakeWindow.__dshVim.palette().rows.findIndex((r) => r.id === 'col-b')
+  assert.ok(running >= 0 && settled >= 0, 'both conversations are on the list')
+  assert.ok(
+    chips[settled].scrollWidth < chips[running].scrollWidth,
+    'the settled row has the narrower chip'
   )
+  // The state gutter leads the row, so it is the first track in the template —
+  // and it is fitted to the widest state on screen, which is what keeps every
+  // name starting at the same x.
+  assert.equal(
+    statusTrack(rows[0]),
+    chips[running].scrollWidth + 'px',
+    'the state gutter is as wide as the widest state on screen'
+  )
+  assert.equal(statusTrack(rows[1]), statusTrack(rows[0]), 'and it is shared by every row')
   for (const chip of chips) {
-    assert.equal(chip.style.justifySelf, 'end', 'a state chip sits on the right of its column')
+    assert.equal(chip.style.justifySelf, 'start', 'a state chip starts at the same x on every row')
   }
   const turns = rows[0].children.find((c) => c.style.opacity === '0.38')
   assert.ok(turns, 'the turn count is on the row')
-  assert.equal(turns.style.gridColumn, '5', 'in its own column, right of the state')
+  assert.equal(turns.style.gridColumn, '4', 'in its own column, right of the state')
   assert.equal(turns.style.justifySelf, 'end', 'the turn count is right aligned')
   const meta = rows[0].children.find((c) => c.style.opacity === '0.5')
   assert.ok(meta, 'the time is on the row')
-  assert.equal(meta.style.gridColumn, '6', 'and the time is the last column')
+  assert.equal(meta.style.gridColumn, '5', 'and the time is the last column')
   assert.equal(meta.style.justifySelf, 'end', 'and the time is right aligned')
   // Measured cells must not wrap: a cell that wrapped would report the width it
   // wrapped into, and the column would be fitted to that instead of its text —
@@ -5289,7 +6683,8 @@ check('without a status source the catalogue running flag is all there is', () =
     { id: 'a', displayTitle: 'busy', updatedAt: ago(1), running: true },
     { id: 'b', displayTitle: 'idle', updatedAt: ago(2) },
   ])
-  // statusFeed is empty, so this exercises the no-entry path as well.
+  // statusFeed is empty, so this exercises the no-entry path as well. The busy
+  // one leads the list: it is the one in flight.
   tap('f')
   assert.deepEqual(renderedStatuses(), [[expectedLabel('statusRunning')], []])
   tap('Escape')
@@ -5368,9 +6763,7 @@ check('the switch key cannot share a key with the rest of its group', () => {
 
 /** The turn counts painted in the mounted window, row by row. */
 function renderedTurns() {
-  const host = body.children[body.children.length - 1]
-  const list = host.children[0].children[1]
-  return list.children.map((row) => {
+  return rowNodes().map((row) => {
     const hit = row.children.find((c) => c.style.opacity === '0.38')
     return hit ? hit.textContent : null
   })
@@ -5738,7 +7131,17 @@ await checkAsync('disposal unmounts the task window, the picker, the notice, and
   statusFeed.put('a', { running: false })
   statusFeed.put('a', { running: true })
   clock.advance(7 * 1000)
-  assert.deepEqual(renderedStatuses(), [[liveChip('statusRunning', 0, 7)]], 'a turn that starts under the watch is timed')
+  assert.deepEqual(
+    renderedStatuses(),
+    [[expectedLabel('statusRunning')]],
+    'a turn that starts under the watch is timed — and seven seconds in, that still shows nothing'
+  )
+  clock.advance(60 * 1000)
+  assert.deepEqual(
+    renderedStatuses(),
+    [[liveChip('statusRunning', 1)]],
+    'once the turn passes a minute the duration appears'
+  )
   tap('Escape')
   ctx6.log.cleanups[0]()
   checks++
@@ -5801,6 +7204,10 @@ await checkAsync('disposal unmounts the task window, the picker, the notice, and
   // ...and the new one arrives while the host is still running that same turn.
   const second = await loadBundle('?reload=11')
   second.apply(makeCtx())
+  // A minute of the turn goes by, so there is a duration to show: under that,
+  // the chip deliberately shows the plain state and this could not tell a kept
+  // stamp from a lost one.
+  clock.advance(60 * 1000)
   fakeWindow.__dshVim.palette(true)
   const row = fakeWindow.__dshVim.palette().rows.find((r) => r.id === 'long')
   assert.ok(row, 'the conversation must still be listed')

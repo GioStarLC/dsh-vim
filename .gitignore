@@ -21,3 +21,7 @@ node_modules/
 # Editor / OS noise
 .DS_Store
 Thumbs.db
+
+# Agent team inboxes and one-off validation dumps
+.agent-teams/
+配置文件校验/
