@@ -1165,6 +1165,10 @@ function reset() {
   projections.clear()
   renames.clear()
   MODEL.clear()
+  // The board's arrangement is stored, and a check that files a card must not
+  // hand the next one a board it did not build. Found by shape: the settings key
+  // is the one storage entry a check may not clear wholesale.
+  for (const key of [...stored.keys()]) if (key.includes('/board/')) stored.delete(key)
   opened.length = 0
   transcript.scrollTop = 0
   sidebar.scrollTop = 0
@@ -6314,6 +6318,52 @@ check('closing the board lets go of a count it is still waiting for', () => {
   assert.deepEqual([...projections.live], ['waiting'], 'the ask holds the scope while it waits')
   tap('Escape')
   assert.deepEqual([...projections.live], [], 'and closing the board releases it')
+})
+
+check('a card dragged onto a column is filed there, and the board remembers', () => {
+  seed([{ id: 'filed', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  const card = cardsIn(boardColumns()[0])[0]
+  fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 10 })
+  aimAt(boardColumns()[2].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+  fire('pointerup', { type: 'pointerup' })
+  assert.equal(cardsIn(boardColumns()[0]).length, 0, 'the inbox lets it go')
+  assert.deepEqual(
+    cardsIn(boardColumns()[2]).map((node) => node.__attrs['data-session-id']),
+    ['filed'],
+    'and the column takes it'
+  )
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[1].ids, ['filed'], 'the arrangement holds it')
+  assert.ok(
+    [...stored.keys()].some((key) => key.includes('/board/')),
+    'and it is written down'
+  )
+  resetHitTest()
+  tap('Escape')
+})
+
+check('escape during a drag puts the card back and leaves the board open', () => {
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(boardColumns()[2].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+  tap('Escape')
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'the board stays up')
+  assert.deepEqual(
+    cardsIn(boardColumns()[0]).map((node) => node.__attrs['data-session-id']),
+    ['kept'],
+    'and the card never left the inbox'
+  )
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[1].ids, [], 'nothing was filed')
+  resetHitTest()
+  tap('Escape')
 })
 
 check('a scroll key reads the column under the pointer', () => {
