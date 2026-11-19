@@ -6253,10 +6253,11 @@ function boardBody() {
   return panel ? panel.children[1] ?? null : null
 }
 
-/** The paper inside the canvas. */
+/** The paper inside the canvas (the stage, under its sizing wrapper). */
 function boardStage() {
   const body = boardBody()
-  return body ? body.children[0] ?? null : null
+  const sizer = body ? body.children[0] ?? null : null
+  return sizer ? sizer.children[0] ?? null : null
 }
 
 /** The workspace and inbox panels, in draw order. */
@@ -6268,7 +6269,7 @@ function boardBlocks() {
 
 /** One panel by the name its heading carries. */
 function boardBlock(label) {
-  return boardBlocks().find((node) => String(node.children[0].children[1].textContent) === label) || null
+  return boardBlocks().find((node) => String(boardSeat(node, 'blockName').textContent) === label) || null
 }
 
 /** Every conversation card under one node, at any depth. */
@@ -6369,7 +6370,7 @@ check('a panel per workspace in play, and the inbox last', () => {
   )
   assert.deepEqual(state.blocks.map((block) => block.ids), [['a', 'b'], ['c'], []], 'each holds its own conversations')
   assert.deepEqual(
-    boardBlocks().map((block) => String(block.children[0].children[1].textContent)),
+    boardBlocks().map((block) => String(boardSeat(block, 'blockName').textContent)),
     ['dsh-vim', 'api', expectedLabel('boardInbox')],
     'the headings say what the API says'
   )
