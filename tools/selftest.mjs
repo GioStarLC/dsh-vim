@@ -6545,6 +6545,50 @@ check('a column keeps the order it was given', () => {
   tap('Escape')
 })
 
+check('marking a card keeps it on the board, and does not open it', () => {
+  seed([{ id: 'marked', displayTitle: 'a keeper', updatedAt: todayAt(1) }])
+  tap('j')
+  const star = cardsIn(boardColumns()[0])[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'cardStar'
+  )
+  assert.ok(star, 'every card can be marked')
+  assert.equal(String(star.textContent), '☆', 'an unmarked card shows the outline')
+  fireOn(star, 'click', { type: 'click', stopPropagation() {} })
+  const again = cardsIn(boardColumns()[0])[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'cardStar'
+  )
+  assert.equal(String(again.textContent), '★', 'and the mark fills in')
+  assert.deepEqual(opened, [], 'marking a card is not opening it')
+  tap('Escape')
+})
+
+check('a marked conversation stays offered after its day is over', () => {
+  // Two days old, and nothing has touched it: without the mark it would not be
+  // on the board at all.
+  seed([{ id: 'kept', displayTitle: 'a keeper', updatedAt: todayAt(1) - 2 * 24 * HOUR }])
+  tap('j')
+  assert.deepEqual(fakeWindow.__dshVim.board().inbox, [], 'an old conversation is not in the inbox')
+  tap('Escape')
+  // Mark it while it is still today's, then let the day go by.
+  seed([{ id: 'kept', displayTitle: 'a keeper', updatedAt: todayAt(1) }])
+  fakeWindow.__dshVim.board(true)
+  fireOn(
+    cardsIn(boardColumns()[0])[0].children.find((cell) => cell.__attrs['data-role'] === 'cardStar'),
+    'click',
+    { type: 'click', stopPropagation() {} }
+  )
+  tap('Escape')
+  seed([{ id: 'kept', displayTitle: 'a keeper', updatedAt: todayAt(1) - 2 * 24 * HOUR }])
+  tap('j')
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['kept'],
+    'a marked conversation keeps its place in the inbox whatever day it belongs to'
+  )
+  assert.deepEqual(fakeWindow.__dshVim.board().starred, ['kept'], 'and the mark is readable')
+  tap('Escape')
+})
+
 check('a scroll key reads the column under the pointer', () => {
   seed(Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, displayTitle: `c${i}`, updatedAt: todayAt(i) })))
   tap('j')
