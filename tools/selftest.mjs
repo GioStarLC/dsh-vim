@@ -6278,6 +6278,44 @@ check('the task window does not give way to the board', () => {
   tap('Escape')
 })
 
+check('a card carries the turn count it manages to read', () => {
+  seed([{ id: 'counted', displayTitle: 'a counted one', updatedAt: todayAt(2) }])
+  projections.put('sessionStats', { turns: 12 })
+  tap('j')
+  assert.equal(fakeWindow.__dshVim.board().inbox[0].turns, 12, 'the count is read for the card')
+  const card = cardsIn(boardColumns()[0])[0]
+  const badge = card.children.find((cell) => cell.__attrs['data-role'] === 'turns')
+  assert.ok(badge, 'a card with a count wears it')
+  assert.equal(String(badge.textContent), '12 ' + expectedLabel('turnUnit'), 'and says how many turns')
+  assert.ok(
+    projections.sources.every((source) => source !== 'mainView'),
+    'the count must never be read as the main view: that marks the conversation read'
+  )
+  tap('Escape')
+  assert.deepEqual([...projections.live], [], 'and the scope is let go with the window')
+})
+
+check('a card with no count to show wears no badge', () => {
+  // A host that never answers. The card is drawn without a number rather than
+  // with a guess, and no placeholder stands where the number would be.
+  seed([{ id: 'unreadable', displayTitle: 'a', updatedAt: todayAt(3) }])
+  tap('j')
+  clock.advance(2000)
+  assert.equal(fakeWindow.__dshVim.board().inbox[0].turns, null, 'no count is better than a wrong one')
+  const card = cardsIn(boardColumns()[0])[0]
+  assert.equal(card.children.find((cell) => cell.__attrs['data-role'] === 'turns'), undefined)
+  assert.equal(String(card.children[0].textContent), 'a', 'and the card is still a card')
+  tap('Escape')
+})
+
+check('closing the board lets go of a count it is still waiting for', () => {
+  seed([{ id: 'waiting', displayTitle: 'a', updatedAt: todayAt(4) }])
+  tap('j')
+  assert.deepEqual([...projections.live], ['waiting'], 'the ask holds the scope while it waits')
+  tap('Escape')
+  assert.deepEqual([...projections.live], [], 'and closing the board releases it')
+})
+
 check('a scroll key reads the column under the pointer', () => {
   seed(Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, displayTitle: `c${i}`, updatedAt: todayAt(i) })))
   tap('j')
