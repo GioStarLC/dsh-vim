@@ -6589,6 +6589,51 @@ check('a marked conversation stays offered after its day is over', () => {
   tap('Escape')
 })
 
+check('a press that never moves still opens the conversation', () => {
+  // The sequence a real pointer produces on a click: down, up, then the click
+  // itself. The card must still be there when the click arrives — a repaint in
+  // between replaces it, and the press is swallowed.
+  seed([{ id: 'clicked', displayTitle: 'a task', updatedAt: todayAt(1) }])
+  tap('j')
+  const card = cardsIn(boardColumns()[0])[0]
+  fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 10 })
+  fire('pointerup', { type: 'pointerup', clientX: 10, clientY: 10 })
+  fireOn(card, 'click', { type: 'click' })
+  assert.deepEqual(opened.slice(-1), ['clicked'], 'the click must reach the conversation')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'and the board gets out of the way')
+})
+
+check('the inbox can be narrowed to what is marked', () => {
+  seed([
+    { id: 'plain', displayTitle: 'plain', updatedAt: todayAt(2) },
+    { id: 'marked', displayTitle: 'marked', updatedAt: todayAt(1) },
+  ])
+  tap('j')
+  const starOf = (id) =>
+    cardsIn(boardColumns()[0])
+      .find((card) => card.__attrs['data-session-id'] === id)
+      .children.find((cell) => cell.__attrs['data-role'] === 'cardStar')
+  fireOn(starOf('marked'), 'click', { type: 'click', stopPropagation() {} })
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['plain', 'marked'],
+    'marking alone does not change what the board shows'
+  )
+  const toggle = boardPanel().children[0].children.find(
+    (cell) => cell.__attrs['data-role'] === 'starFilter'
+  )
+  assert.ok(toggle, 'the heading offers the filter')
+  fireOn(toggle, 'click', { type: 'click' })
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['marked'],
+    'and turning it on leaves only what is marked'
+  )
+  fireOn(toggle, 'click', { type: 'click' })
+  assert.equal(fakeWindow.__dshVim.board().inbox.length, 2, 'turning it off puts everything back')
+  tap('Escape')
+})
+
 check('a scroll key reads the column under the pointer', () => {
   seed(Array.from({ length: 6 }, (_, i) => ({ id: `c${i}`, displayTitle: `c${i}`, updatedAt: todayAt(i) })))
   tap('j')
