@@ -165,6 +165,15 @@ function el(opts = {}) {
       child.isConnected = false
       return child
     },
+    insertBefore(child, ref) {
+      const i = ref ? node.children.indexOf(ref) : -1
+      if (i >= 0) node.children.splice(i, 0, child)
+      else node.children.push(child)
+      child.parentNode = node
+      child.parentElement = node
+      child.isConnected = true
+      return child
+    },
     scrollIntoView() {},
     addEventListener(type, fn) {
       const handlers = node.__listeners[type] ?? (node.__listeners[type] = [])
@@ -6231,6 +6240,20 @@ function boardHeading() {
   return { title: String(head.children[0].textContent), count: String(head.children[1].textContent) }
 }
 
+/**
+ * The board's stored document, read straight out of the fake storage.
+ *
+ * The arrangement is the plugin's own record rather than anything it projects
+ * for a check, so a check about what will survive a reload reads this.
+ * @returns {object|null} the stored board, or null when none was written.
+ */
+function boardDoc() {
+  for (const key of stored.keys()) {
+    if (key.includes('/board/')) return JSON.parse(stored.get(key))
+  }
+  return null
+}
+
 /** Press a card, the way a reader does. */
 function clickBoardCard(card) {
   fireOn(card, 'click', { type: 'click' })
@@ -6417,10 +6440,31 @@ check('a new column is added and named where it stands', () => {
   tap('Escape')
 })
 
-check('a column that still holds something refuses to be removed', () => {
+/**
+ * A seat inside a column's body, found by its `data-role` wherever it sits.
+ *
+ * The confirm strip nests its buttons two levels down, so the lookup walks
+ * instead of reading one level.
+ * @param {object} column - the column element.
+ * @param {string} role - the `data-role` to find.
+ * @returns {object|null} the seat, or null when the column shows none.
+ */
+function boardSeat(column, role) {
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (child.__attrs && child.__attrs['data-role'] === role) return child
+      const found = walk(child)
+      if (found) return found
+    }
+    return null
+  }
+  return column && column.children[1] ? walk(column.children[1]) : null
+}
+
+check('a column holding conversations asks before it goes, and hands them back', () => {
   seed([{ id: 'held', displayTitle: 'held', updatedAt: todayAt(1) }])
   tap('j')
-  // File the card into the first list, then try to remove that list.
+  // File the card into the first list, then try to take that list down.
   fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
     type: 'pointerdown',
     button: 0,
@@ -6434,15 +6478,235 @@ check('a column that still holds something refuses to be removed', () => {
   const remove = boardColumns()[1].children[0].children.find(
     (cell) => cell.__attrs['data-role'] === 'columnRemove'
   )
-  assert.ok(remove, 'every list can be removed')
   fireOn(remove, 'click', { type: 'click', stopPropagation() {} })
-  assert.equal(fakeWindow.__dshVim.board().filed.length, 3, 'a column holding cards stays')
-  // The empty one beside it goes.
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 3, 'a column holding cards stays for now')
+  assert.ok(boardSeat(boardColumns()[1], 'columnConfirm'), 'and asks, in the column itself')
+  // The way out of it that costs nothing: cancel, Escape, or the same × again.
+  fireOn(boardSeat(boardColumns()[1], 'columnCancel'), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 3, 'keeping the column keeps the cards')
+  assert.equal(boardSeat(boardColumns()[1], 'columnConfirm'), null, 'and the ask is gone')
+  fireOn(remove, 'click', { type: 'click', stopPropagation() {} })
+  assert.ok(boardSeat(boardColumns()[1], 'columnConfirm'), 'the × asks again')
+  tap('Escape')
+  assert.equal(boardSeat(boardColumns()[1], 'columnConfirm'), null, 'escape takes the ask back')
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'without closing the board')
+  // Confirmed, the column goes and the conversations come home marked.
+  fireOn(remove, 'click', { type: 'click', stopPropagation() {} })
+  fireOn(boardSeat(boardColumns()[1], 'columnConfirm'), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 2, 'the column is gone')
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['held'],
+    'and the conversation it held is back in the inbox'
+  )
+  assert.equal(boardDoc().starred.held, true, 'marked, so it stays past the day it last moved')
+  resetHitTest()
+  tap('Escape')
+})
+
+check('an empty column goes without asking', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
   const spare = boardColumns()[2].children[0].children.find(
     (cell) => cell.__attrs['data-role'] === 'columnRemove'
   )
   fireOn(spare, 'click', { type: 'click', stopPropagation() {} })
-  assert.equal(fakeWindow.__dshVim.board().filed.length, 2, 'an empty one does not')
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 2, 'nothing to ask about: it goes at once')
+  assert.ok(
+    boardColumns().every((column) => !boardSeat(column, 'columnConfirm')),
+    'and no ask was ever drawn'
+  )
+  tap('Escape')
+})
+
+check('every column can go, and the seeds do not come back', () => {
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(1) }])
+  tap('j')
+  for (let round = 0; round < 3; round++) {
+    const remove = boardColumns()[1].children[0].children.find(
+      (cell) => cell.__attrs['data-role'] === 'columnRemove'
+    )
+    fireOn(remove, 'click', { type: 'click', stopPropagation() {} })
+  }
+  assert.equal(fakeWindow.__dshVim.board().filed.length, 0, 'all three lists are gone')
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().columns,
+    [expectedLabel('boardInbox')],
+    'the inbox is all that is left, and no list came back to take its place'
+  )
+  assert.equal(boardDoc().columns.length, 0, 'what is stored says the same: no columns')
+  // The board is closed and opened again, which is the moment a fresh read of
+  // storage could resurrect the shipped lists.
+  tap('Escape')
+  tap('j')
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().columns,
+    [expectedLabel('boardInbox')],
+    'reopening does not reseed what the reader took down'
+  )
+  tap('Escape')
+})
+
+check('the drop line is drawn where the card will land', () => {
+  seed([
+    { id: 'one', displayTitle: 'one', updatedAt: todayAt(2) },
+    { id: 'two', displayTitle: 'two', updatedAt: todayAt(1) },
+  ])
+  tap('j')
+  // File the first card, so the second can be aimed at a column that is not
+  // empty: the line has to land in front of a card, not only at the end.
+  fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(boardColumns()[1].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+  fire('pointerup', { type: 'pointerup' })
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['one'], 'the first card is filed')
+  // The filed card now sits in the column's folder block; its list is where a
+  // drop lands in front of it.
+  const list = cardsIn(boardColumns()[1])[0].parentNode
+  cardsIn(boardColumns()[1])[0].__rect = { top: 0, left: 0, width: 240, height: 40, right: 240, bottom: 40 }
+  fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(list)
+  fire('pointermove', { type: 'pointermove', clientX: 100, clientY: 10, preventDefault() {} })
+  const drawn = list.children.find((cell) => cell.__attrs['data-role'] === 'dropLine')
+  assert.ok(drawn, 'a carried card draws where it will land')
+  assert.equal(list.children.indexOf(drawn), 0, 'in front of the card it lands in front of')
+  fire('pointerup', { type: 'pointerup' })
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().filed[0].ids,
+    ['two', 'one'],
+    'and the card is filed exactly there, in front of the one it was aimed at'
+  )
+  assert.equal(
+    list.children.find((cell) => cell.__attrs['data-role'] === 'dropLine'),
+    undefined,
+    'the line leaves with the gesture'
+  )
+  resetHitTest()
+  tap('Escape')
+})
+
+check('a drop aimed between two folders lands between them', () => {
+  registry.publish([], [
+    { workspaceId: 'wa', title: 'one workspace', path: 'G:\\one', sessionIds: ['a1'] },
+    { workspaceId: 'wb', title: 'another workspace', path: 'G:\\two', sessionIds: ['b1'] },
+  ])
+  seed([
+    { id: 'a1', displayTitle: 'a one', updatedAt: todayAt(3) },
+    { id: 'b1', displayTitle: 'b one', updatedAt: todayAt(2) },
+    { id: 'fresh', displayTitle: 'fresh off the inbox', updatedAt: todayAt(1) },
+  ])
+  tap('j')
+  // File both cards into the first list, one folder block each.
+  for (const id of ['a1', 'b1']) {
+    const card = cardsIn(boardColumns()[0]).find((node) => node.__attrs['data-session-id'] === id)
+    fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 10 })
+    aimAt(boardColumns()[1].children[1])
+    fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+    fire('pointerup', { type: 'pointerup' })
+  }
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['a1', 'b1'], 'both cards are filed')
+  const blocks = boardColumns()[1].children[1].children
+  assert.equal(blocks.length, 2, 'each folder holds its own block')
+  blocks[0].__rect = { top: 0, left: 0, width: 264, height: 60, right: 264, bottom: 60 }
+  blocks[1].__rect = { top: 70, left: 0, width: 264, height: 60, right: 264, bottom: 130 }
+  // The gap between the blocks: not over a card, not over a heading — the place
+  // a drop used to fall through to the end of the column from.
+  fireOn(cardsIn(boardColumns()[0])[0], 'pointerdown', {
+    type: 'pointerdown',
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  })
+  aimAt(boardColumns()[1].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 130, clientY: 65, preventDefault() {} })
+  assert.equal(
+    blocks.indexOf(blocks.find((cell) => cell.__attrs['data-role'] === 'dropLine')),
+    1,
+    'the line is drawn between the blocks, not at the end'
+  )
+  fire('pointerup', { type: 'pointerup' })
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().filed[0].ids,
+    ['a1', 'fresh', 'b1'],
+    'the card lands between the folders it was aimed between'
+  )
+  resetHitTest()
+  tap('Escape')
+})
+
+check('a hand that jitters still works the mark in the corner', () => {
+  seed([{ id: 'kept', displayTitle: 'kept', updatedAt: todayAt(1) }])
+  tap('j')
+  const card = cardsIn(boardColumns()[0])[0]
+  const star = card.children.find((cell) => cell.__attrs['data-role'] === 'cardStar')
+  assert.ok(star, 'every card wears the mark')
+  // The press travels past the slop, so the gesture counts as a drag — and
+  // lets go over the card it started from, which is what a jittery press on a
+  // small corner target is.
+  fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 6 })
+  aimAt(boardColumns()[0].children[1])
+  fire('pointermove', { type: 'pointermove', clientX: 30, clientY: 14, preventDefault() {} })
+  fire('pointerup', { type: 'pointerup' })
+  assert.equal(cardsIn(boardColumns()[0])[0], card, 'a drop that moved nothing repaints nothing')
+  fireOn(star, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(boardDoc().starred.kept, true, 'so the click the browser still owes lands on the mark')
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().inbox.map((row) => row.id),
+    ['kept'],
+    'and the card never left the inbox'
+  )
+  resetHitTest()
+  tap('Escape')
+})
+
+check('a jittery drop on a card in a column leaves it where it was', () => {
+  seed([
+    { id: 'c1', displayTitle: 'c1', updatedAt: todayAt(3) },
+    { id: 'c2', displayTitle: 'c2', updatedAt: todayAt(2) },
+    { id: 'c3', displayTitle: 'c3', updatedAt: todayAt(1) },
+  ])
+  tap('j')
+  for (const id of ['c1', 'c2', 'c3']) {
+    const card = cardsIn(boardColumns()[0]).find((node) => node.__attrs['data-session-id'] === id)
+    fireOn(card, 'pointerdown', { type: 'pointerdown', button: 0, clientX: 10, clientY: 10 })
+    aimAt(boardColumns()[1].children[1])
+    fire('pointermove', { type: 'pointermove', clientX: 400, clientY: 200, preventDefault() {} })
+    fire('pointerup', { type: 'pointerup' })
+  }
+  assert.deepEqual(fakeWindow.__dshVim.board().filed[0].ids, ['c1', 'c2', 'c3'], 'three cards, in the order they were filed')
+  // The middle card: a press on it that jitters lets go anchored to itself,
+  // which used to read as "the end of the column" and quietly moved it there.
+  const filed = cardsIn(boardColumns()[1])
+  filed[0].__rect = { top: 0, left: 0, width: 240, height: 40, right: 240, bottom: 40 }
+  filed[1].__rect = { top: 40, left: 0, width: 240, height: 40, right: 240, bottom: 80 }
+  filed[2].__rect = { top: 80, left: 0, width: 240, height: 40, right: 240, bottom: 120 }
+  const list = filed[1].parentNode
+  fireOn(filed[1], 'pointerdown', { type: 'pointerdown', button: 0, clientX: 120, clientY: 60 })
+  aimAt(list)
+  fire('pointermove', { type: 'pointermove', clientX: 126, clientY: 60, preventDefault() {} })
+  fire('pointerup', { type: 'pointerup' })
+  assert.deepEqual(
+    fakeWindow.__dshVim.board().filed[0].ids,
+    ['c1', 'c2', 'c3'],
+    'a drop named by the card itself means where it already is'
+  )
+  assert.equal(cardsIn(boardColumns()[1])[1], filed[1], 'and the board was not even repainted')
+  fireOn(
+    filed[1].children.find((cell) => cell.__attrs['data-role'] === 'cardStar'),
+    'click',
+    { type: 'click', stopPropagation() {} }
+  )
+  assert.equal(boardDoc().starred.c2, true, 'the mark in its corner answers the same way')
   resetHitTest()
   tap('Escape')
 })
