@@ -62,24 +62,59 @@ const clock = {
   },
   /**
    * Advance virtual time, firing due timers and one animation frame per slice.
+   *
+   * A slice nobody is watching is skipped rather than stepped: with no frame
+   * queued, the only thing that can happen inside the span is a timer falling
+   * due, so the clock jumps straight to it. That matters because a day is 5.4
+   * million 16 ms slices and the history checks advance one; stepping them all
+   * to reach the midnight they ask about is a way to run the suite out of
+   * memory instead of filing a page.
    * @param {number} ms - milliseconds to advance.
    * @param {Function} [onSlice] - called after each slice, for sampling.
    */
   advance(ms, onSlice) {
     const end = now + ms
+    let stuck = 0
     while (now < end) {
-      now = Math.min(now + FRAME_MS, end)
+      const was = now
+      if (frames.length === 0) {
+        // Something already due is not something to jump past: leave the clock
+        // where it is and let the fire loop below take it.
+        let next = end
+        for (const t of timers) {
+          if (t.at <= now) {
+            next = now
+            break
+          }
+          if (t.at < next) next = t.at
+        }
+        now = next
+      } else {
+        now = Math.min(now + FRAME_MS, end)
+      }
       let guard = 0
       for (;;) {
-        const due = timers.filter((t) => t.at <= now).sort((a, b) => a.at - b.at)
-        if (due.length === 0 || ++guard > 500) break
-        const t = due[0]
-        timers.splice(timers.indexOf(t), 1)
-        t.fn()
+        // The earliest due timer, scanned for rather than sorted into a fresh
+        // array on every fire.
+        let due = null
+        for (const t of timers) if (t.at <= now && (due === null || t.at < due.at)) due = t
+        if (due === null || ++guard > 500) break
+        timers.splice(timers.indexOf(due), 1)
+        due.fn()
       }
       const batch = frames.splice(0)
       for (const f of batch) f.fn(now)
       if (onSlice) onSlice()
+      // A timer that keeps falling due behind the clock leaves it where it is,
+      // and a walk that never moves is a bug in what is being tested: fail that
+      // check with a word about it rather than let the heap fill up.
+      if (now === was) {
+        if (++stuck > 1000) {
+          throw new Error(`clock.advance(${ms}) made no progress in ${stuck} turns: a timer is rescheduling itself`)
+        }
+      } else {
+        stuck = 0
+      }
     }
     now = end
   },
@@ -1375,6 +1410,12 @@ let checks = 0
  */
 function reset() {
   fakeWindow.__dshVim.stop()
+  // A check is a page of its own, so neither a timer nor a frame that the one
+  // before it left queued may fire into it. A stale frame is not merely late:
+  // it is called back once per slice of every later advance, so one animation
+  // left behind made every check after it pay for it.
+  timers.length = 0
+  frames.length = 0
   // The history lives as long as the page does, and a check is not a page: it
   // starts from no steps so that "nothing to take back" means it.
   fakeWindow.__dshVim.clearHistory()
