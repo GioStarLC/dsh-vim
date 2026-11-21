@@ -1,16 +1,20 @@
 # dsh-vim 开发约定
 
-这个仓库有两个检出，共用同一个 `.git`：
+这个仓库只有一个检出：`G:\桌面\dsh-vim`，分支 `main`。日常那个 DSH 应用的 `desktop`
+profile 直接 link 这里，所以这里跑的就是你看的看板。
 
-- `G:\桌面\dsh-vim` —— **live**。日常那个 DSH 应用的 `desktop` profile 直接 link 这里，
-  它只接受 `git merge --ff-only`，不要在这个目录里改代码。
-- `G:\桌面\dsh-vim-dev` —— **dev** worktree（分支 `dev`），所有开发在这里做。
+开发：直接改。验证 `node tools/selftest.mjs`（纯 Node、无端口）。想确认它不会再吃爆堆，
+加 `--max-old-space-size=256` —— 虚拟时钟跨一天是按下一次定时器跳过去的，不再按 16 ms
+一片走完 540 万片。
 
-验证：`node tools/selftest.mjs`（纯 Node、无端口，dev 和 live 各自可跑）。
+生效：应用只在**启动时**读 `lib/client.js`，所以重启才看得到改动；改文件本身不影响正在
+运行的进程。
 
-发布：在 dev 里跑 `node tools/publish.mjs` —— 先跑 selftest，绿了才把 live 快进到 `dev`；
-应用只在**启动时**读 `lib/client.js`，所以重启才看得到。
+回滚：`git reset --hard HEAD~1`，或 `git revert` 掉某个提交。
 
-回滚：`git -C "G:\桌面\dsh-vim" reset --hard ORIG_HEAD`。
+发布：没有单独的发布步骤，提交到 `main` 就是发布。`tools/publish.mjs` 是两检出时代的
+遗留脚本，它检测到自己在 live 上就会直接报错退出，忽略即可。
 
-被要求直接在 live 目录改代码时先确认一次：那会让正在使用的看板在下次重启时变样。
+历史：`dev` 分支停在 64512e7，是两检出时代留下的；`wip/board-0.48.1-carry`（73c7884）
+收着一份从 dev 工作区原样救下的 0.48.1 想法卡改动（README / client.js / selftest 三件
+一套，未验证），要用就 `git cherry-pick 73c7884`。
