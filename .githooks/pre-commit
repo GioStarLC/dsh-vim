@@ -1,0 +1,17 @@
+#!/bin/sh
+# dsh-vim pre-commit gate.
+#
+# Syntax of the two shipped files, then the behavioural suite (~3 s).
+# A red main is what made every session start by triaging somebody else's
+# breakage, so a red check does not get committed. While you are fixing the
+# check itself, --no-verify is the way through: say so in the message.
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+start=$(date +%s)
+node --check lib/client.js
+node --check lib/index.js
+node tools/selftest.mjs > /dev/null
+end=$(date +%s)
+
+echo "pre-commit: syntax + selftest ok ($((end - start))s)"

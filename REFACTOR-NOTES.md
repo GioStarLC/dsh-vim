@@ -63,7 +63,7 @@ TURNS / RUNS / TOAST 三者都满足： neither 外部直接改字段，且 self
 
 ## 结构性约束（写之前必须知道）
 
-- **不能拆文件**：`README.md:343` 明确「没有构建步骤，`lib/` 是手写的、可直接运行的 JS」。
+- **不能拆文件**：`README.md` 的「结构」一节明确「没有构建步骤，`lib/` 是手写的、可直接运行的 JS」。
   仓库唯一的 `require()` 是 `require('react')`。所谓「拆 module」只能是同一个文件内的 closure，
   封装来自作用域而非文件名。
 - **无版本控制**：仓库没有 `.git`。任何重构前请先手工备份（见 `.refactor-backup/`）。

@@ -38,8 +38,8 @@ node .agent/dead-fn.mjs lib/client.js → 195 declared / 0 unreferenced
 ```
 
 **上一轮刻意没做的一件事**：当时的口头决定是"行首那格文件夹标签**先留着**，体验之后再说"。
-那"之后"就是本文件。`README.md` 的「已知限制」和升级表 0.18.x 里都写了这个待办状态，
-改完要一并更新。
+那"之后"就是本文件。当时 `README.md` 的「已知限制」和升级表 0.18.x 里写着这个待办状态；
+现在版本历史归 `CHANGELOG.md`，改完记在那里即可。
 
 ---
 
@@ -190,10 +190,7 @@ fitColumns → widestCell(PALETTE.columns.folder)
 - [ ] `node tools/selftest.mjs` → 全绿（基线 **279**，新用例数要高于 279）
 - [ ] `node .agent/dead-fn.mjs lib/client.js` → `never referenced : 0`
 - [ ] 死物清理干净（第 4.4 节），无残留引用
-- [ ] `README.md` 三处同步：
-      · 「任务窗」章节里"行首那格文件夹标签**先留着**"那段，改成说明已去掉
-      · 已知限制里"文件夹分组只能抄到工作区这一层"那条，补上内联前缀的行为
-      · 升级表 `0.18.x` 那一行，补上这一步
+- [ ] 行为变化写进 `CHANGELOG.md` 的 `0.18.0` 下（`README.md` 不再维护版本历史）
 - [ ] `package.json` / `dsh.plugin.json` 若动了行为，同步版本
 - [ ] **真机看一次**：揭示 `更多` 前后，已在屏幕上的行不能有任何位移
 
