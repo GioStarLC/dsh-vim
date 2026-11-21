@@ -353,6 +353,9 @@ function el(opts = {}) {
   return node
 }
 
+/** Flow rows a check mounted into the transcript, taken down with the page. */
+const arrivedRows = []
+
 const transcript = el({ className: 'transcript', overflowY: 'auto', scrollHeight: 5000, clientHeight: 800 })
 // The conversation's own body, as the shell marks it on a real page (the
 // conversation skeleton renders `data-conversation-content` around its
@@ -987,6 +990,37 @@ const statusFeed = {
 }
 
 /**
+ * Mutable stand-in for `ctx.uiSession.adapter.current`, the shell's own answer
+ * to "which conversation is the main view showing": a host observable whose
+ * value carries the session id, notified whenever the main view moves.
+ */
+const currentBinding = {
+  key: undefined,
+  listeners: [],
+  getSnapshot() {
+    return { key: this.key }
+  },
+  subscribe(listener) {
+    this.listeners.push(listener)
+    return () => {
+      const i = this.listeners.indexOf(listener)
+      if (i >= 0) this.listeners.splice(i, 1)
+    }
+  },
+  /** Publish the conversation the main view now retains, as opening one does. */
+  open(sessionId) {
+    this.key = sessionId
+    for (const listener of this.listeners.slice()) listener()
+  },
+  /** Let go of the main view, as leaving for the board or the home page does. */
+  clear() {
+    if (this.key === undefined) return
+    this.key = undefined
+    for (const listener of this.listeners.slice()) listener()
+  },
+}
+
+/**
  * Mutable stand-in for `ctx.modelDirectories`: one session's shared model
  * directory, the same object the composer's own Effort row reads and writes.
  * `publish()` says what the host has selected and what the adapter publishes for
@@ -1259,7 +1293,7 @@ function makeCtx(options = {}) {
         return options.model === null ? undefined : { directoryFor: MODEL.directoryFor, catalog: MODEL.catalog }
       }
       if (withServices && options.sessionStatus !== false && name === 'uiSession') {
-        return { sessionStatus: statusFeed }
+        return { sessionStatus: statusFeed, adapter: { current: currentBinding } }
       }
       if (withServices && name === 'uiWorkspace') {
         return {
@@ -1524,10 +1558,19 @@ function reset() {
   editor.isContentEditable = true
   editor.__rect = null
   composer.__rect = null
+  for (const row of arrivedRows.splice(0)) if (row.parentNode) row.parentNode.removeChild(row)
+  transcript.__rect = null
+  transcript.scrollHeight = 5000
+  transcript.clientHeight = 800
+  // The main view is back on its own page; the entry watch must see a fresh
+  // arrival rather than a conversation the last check left on screen.
+  currentBinding.clear()
   // Same lookup as the document's own, kept in step with it: the menu is asked
   // about first, and the message box marker second.
   fakeDocument.querySelector = (selector) =>
-    (menuOnScreen && matches(menu, selector) ? menu : null) ?? (matches(editor, selector) ? editor : null)
+    (menuOnScreen && matches(menu, selector) ? menu : null)
+    ?? (matches(editor, selector) ? editor : null)
+    ?? (matches(transcript, selector) ? transcript : null)
   // The pointer is part of the plugin's state, so it is reset with the rest:
   // a blur forgets the remembered point, and the layout-shaped hit-test leaves
   // the centre rule looking at the conversation, exactly as it always did.
@@ -8124,6 +8167,92 @@ check('a panel of three has no rule to draw', () => {
   now = was
 })
 
+/** The state one conversation's card is wearing, as the words the card shows. */
+function cardStateWords(id) {
+  const card = cardsIn(boardStage()).find((node) => node.__attrs['data-session-id'] === id)
+  if (!card) return ''
+  const computed = boardSeat(card, 'status')
+  const said = boardSeat(card, 'cardState')
+  const offered = boardSeat(card, 'cardStateAdd')
+  if (computed) return String(computed.textContent)
+  if (said) return String(said.textContent)
+  return offered ? '+' : ''
+}
+
+/** The card of one conversation, as it stands on the board now. */
+function cardOf(id) {
+  return cardsIn(boardStage()).find((node) => node.__attrs['data-session-id'] === id) || null
+}
+
+check('a completion the reader has opened still says something', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['done'] }])
+  seed([{ id: 'done', displayTitle: 'finished', updatedAt: todayAt(2) }])
+  statusFeed.put('done', { running: false, completionUnread: true })
+  tap('j')
+  assert.equal(cardStateWords('done'), expectedLabel('statusDone'), 'the shell says it just finished')
+  // The reader opens it. The shell drops the flag the moment the conversation is
+  // read, which is the whole reason the board writes the fact down itself.
+  statusFeed.put('done', { running: false, completionUnread: false })
+  tap('Escape')
+  tap('j')
+  assert.equal(cardStateWords('done'), expectedLabel('statusFinished'),
+    'and after reading it the card says it finished, rather than nothing at all')
+  tap('Escape')
+})
+
+check('a card with nothing to say offers the two words', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['plain'] }])
+  seed([{ id: 'plain', displayTitle: 'plain', updatedAt: todayAt(2) }])
+  tap('j')
+  assert.equal(boardSeat(cardOf('plain'), 'status'), null, 'the shell has nothing to say about it')
+  const add = boardSeat(cardOf('plain'), 'cardStateAdd')
+  assert.ok(add, 'so the empty seat is offered')
+  fireOn(add, 'click', { type: 'click', stopPropagation() {} })
+  const menu = boardSeat(cardOf('plain'), 'verdictMenu')
+  assert.ok(menu, 'a press on it opens the two words')
+  assert.deepEqual(
+    menu.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'verdictPick')
+      .map((node) => node.__attrs['data-verdict']),
+    ['paused', 'settled'],
+    'paused and settled, in that order'
+  )
+  const paused = menu.children.find((node) => node.__attrs && node.__attrs['data-verdict'] === 'paused')
+  fireOn(paused, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(cardStateWords('plain'), expectedLabel('statusPaused'), 'the card wears the word the reader gave it')
+  tap('Escape')
+  tap('j')
+  assert.equal(cardStateWords('plain'), expectedLabel('statusPaused'), 'and it is still there after a round trip')
+  tap('Escape')
+})
+
+check('a word about an older turn is a word about nothing', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['plain'] }])
+  seed([{ id: 'plain', displayTitle: 'plain', updatedAt: todayAt(2) }])
+  tap('j')
+  fireOn(boardSeat(cardOf('plain'), 'cardStateAdd'), 'click', { type: 'click', stopPropagation() {} })
+  const settled = boardSeat(cardOf('plain'), 'verdictMenu').children
+    .find((node) => node.__attrs && node.__attrs['data-verdict'] === 'settled')
+  fireOn(settled, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(cardStateWords('plain'), expectedLabel('statusSettled'), 'settled, as the reader said')
+  // The conversation moves: a new turn, a new message. What the reader said was
+  // about the turn before that, and the card must not keep claiming it.
+  seed([{ id: 'plain', displayTitle: 'plain', updatedAt: todayAt(2) + 1 }])
+  tap('Escape')
+  tap('j')
+  assert.equal(cardStateWords('plain'), '+', 'so the card is back to offering the seat')
+  tap('Escape')
+})
+
+check('a card the shell is talking about offers no state control', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['run'] }])
+  seed([{ id: 'run', displayTitle: 'running', updatedAt: todayAt(2) }])
+  statusFeed.put('run', { running: true })
+  tap('j')
+  assert.equal(cardStateWords('run'), expectedLabel('statusRunning'), 'the turn in flight owns the slot')
+  assert.equal(boardSeat(cardOf('run'), 'cardStateAdd'), null, 'and the seat is not offered while it does')
+  tap('Escape')
+})
+
 check('a conversation with no goal wears no goal colour', () => {
   // A workspace owns no conversations today, so the one on the board is the
   // tray's: the tray is where work has no home, and a hue would be claiming one.
@@ -11200,6 +11329,129 @@ check('a conversation is sorted across its panel by dragging it', () => {
   tap('Escape')
 })
 
+/**
+ * The conversations a panel draws as columns, in the order it draws them.
+ * @param {object} block - the panel.
+ * @returns {Array<string>} session ids.
+ */
+function drawnColumns(block) {
+  const grid = boardSeat(block, 'blockColumns')
+  if (!grid) return []
+  return grid.children
+    .filter((node) => node.__attrs && node.__attrs['data-column'] !== undefined)
+    .map((node) => String(node.__attrs['data-column']))
+}
+
+check('the warm run keeps the panel\'s own order, however recently a card moved', () => {
+  // Mid-afternoon, so "three hours ago" is earlier today whatever the hour the
+  // suite happens to run at. A check about warm and cold is a check about one
+  // day.
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  const first = [
+    { id: 'q', displayTitle: 'q', updatedAt: ago(1) },
+    { id: 's', displayTitle: 's', updatedAt: ago(2) },
+    { id: 'p', displayTitle: 'p', updatedAt: ago(4) },
+    { id: 'r', displayTitle: 'r', updatedAt: ago(5) },
+    { id: 't', displayTitle: 't', updatedAt: ago(6) },
+  ]
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['q', 's', 'p', 'r', 't'] }])
+  seed(first)
+  tap('j')
+  assert.deepEqual(drawnColumns(boardBlock('dsh-vim')), ['q', 's', 'p', 'r', 't'],
+    'the warm two lead in the order the panel wrote down')
+  tap('Escape')
+  // s is now the newest card on the panel. A sort by when a card last moved
+  // would stand it first; the page the reader already learned does not move.
+  seed([
+    { id: 'q', displayTitle: 'q', updatedAt: ago(2) },
+    { id: 's', displayTitle: 's', updatedAt: ago(1) },
+    { id: 'p', displayTitle: 'p', updatedAt: ago(4) },
+    { id: 'r', displayTitle: 'r', updatedAt: ago(5) },
+    { id: 't', displayTitle: 't', updatedAt: ago(6) },
+  ])
+  tap('j')
+  assert.deepEqual(drawnColumns(boardBlock('dsh-vim')), ['q', 's', 'p', 'r', 't'],
+    'the same five read in the same order, and nothing moved because a clock did')
+  tap('Escape')
+  now = was
+})
+
+check('a conversation that arrives later is appended, not seated by when it arrived', () => {
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['p', 'q'] }])
+  seed([
+    { id: 'p', displayTitle: 'p', updatedAt: ago(1) },
+    { id: 'q', displayTitle: 'q', updatedAt: ago(2) },
+  ])
+  tap('j')
+  const before = drawnColumns(boardBlock('dsh-vim'))
+  tap('Escape')
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['p', 'q', 'u'] }])
+  seed([
+    { id: 'p', displayTitle: 'p', updatedAt: ago(1) },
+    { id: 'q', displayTitle: 'q', updatedAt: ago(2) },
+    { id: 'u', displayTitle: 'u', updatedAt: ago(0.5) },
+  ])
+  tap('j')
+  assert.deepEqual(drawnColumns(boardBlock('dsh-vim')), before.concat(['u']),
+    'the new conversation takes the end, and the ones already there keep their places')
+  tap('Escape')
+  now = was
+})
+
+check('a sort across a wrapped panel reads the row the hand is in', () => {
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['p', 'q', 'r', 's', 't'] }])
+  seed([
+    { id: 'p', displayTitle: 'p', updatedAt: ago(4) },
+    { id: 'q', displayTitle: 'q', updatedAt: ago(5) },
+    { id: 'r', displayTitle: 'r', updatedAt: ago(6) },
+    { id: 's', displayTitle: 's', updatedAt: ago(7) },
+    { id: 't', displayTitle: 't', updatedAt: ago(8) },
+  ])
+  tap('j')
+  const block = boardBlock('dsh-vim')
+  const before = drawnColumns(block)
+  assert.equal(before.length, 5, 'five cold conversations are three columns over two rows')
+  block.__rect = { top: 60, left: 0, width: 920, height: 900, right: 920, bottom: 960 }
+  // The body is the older boundary, kept measurable so the check also says what
+  // the sort used to do with the page.
+  const body = boardSeat(block, 'blockBody')
+  if (body) body.__rect = { top: 100, left: 0, width: 900, height: 800, right: 900, bottom: 900 }
+  const columns = boardSeat(block, 'blockColumns').children
+  columns.forEach((column, at) => {
+    const row = at < 3 ? 0 : 1
+    const col = at < 3 ? at : at - 3
+    column.__rect = {
+      top: 120 + row * 320,
+      left: col * 292,
+      width: 280,
+      height: 300,
+      right: col * 292 + 280,
+      bottom: 420 + row * 320,
+    }
+  })
+  // Take the first conversation down into the second row, between the fourth
+  // and the fifth. The hand is beside the fourth card, not below the second one,
+  // so p takes the hole after it instead of the first row's first hole.
+  pressForDrag(cardsIn(columns[0])[0], 100, 200)
+  dragTo(300, 500)
+  assert.deepEqual(boardDoc().order.w1,
+    [before[1], before[2], before[3], before[0], before[4]],
+    'the hand was beside the second row, and the order says so')
+  tap('Escape')
+  now = was
+})
+
 check('a goal keeps its conversations while their thoughts are put away', () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
   seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
@@ -11443,6 +11695,110 @@ await checkAsync('a sentence can be found across the pages', async () => {
   assert.ok(String(hit.textContent || '').includes('灰度'), 'with the words it was found by')
   fakeWindow.__dshVim.historyPanel(false)
   tap('Escape')
+})
+
+
+// --- entry anchor: where an opened conversation starts reading ---------------
+
+/**
+ * Put one flow row on screen, the way the chat renders it: a shell-tagged row
+ * inside the conversation's own body, at a measured place in a scrollport
+ * parked at its floor.
+ *
+ * The geometry is written as the browser would report it at that floor, so the
+ * plugin's anchor arithmetic is exercised against real coordinates rather than
+ * a row that merely exists.
+ * @param {object} [options] - `{ kind, session, scrollHeight, clientHeight, top, height }`.
+ * @returns {object} the row.
+ */
+function arriveInputRow(options = {}) {
+  const height = options.height ?? 120
+  const top = options.top ?? 380
+  const scrollerHeight = options.clientHeight ?? 800
+  const content = options.scrollHeight ?? 5000
+  transcript.scrollHeight = content
+  transcript.clientHeight = scrollerHeight
+  transcript.__rect = { top: 100, left: 0, width: 900, height: scrollerHeight, right: 900, bottom: 100 + scrollerHeight }
+  transcript.scrollTop = options.scrollTop ?? content - scrollerHeight
+  transcript.setAttribute('data-conversation-session', options.session ?? 's1')
+  const row = el({ tag: 'DIV', parent: transcript })
+  row.setAttribute('data-chat-flow-kind', options.kind ?? 'user')
+  row.__rect = { top, left: 0, width: 900, height, right: 900, bottom: top + height }
+  transcript.appendChild(row)
+  arrivedRows.push(row)
+  return row
+}
+
+check('a conversation opened at its tail starts at the last thing the reader wrote', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  arriveInputRow({ session: 's1', scrollHeight: 9000, top: -2100, height: 120 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  // The prompt's top is 6000 in the content and the answer runs to 9000, so
+  // the anchor is within the scrollport's range: 16px of air above the message.
+  assert.equal(transcript.scrollTop, 5984, 'the last prompt sits at the top of the viewport')
+})
+
+check('a conversation the shell restored mid-answer keeps the position it saved', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  arriveInputRow({ session: 's1', top: 380, height: 120, scrollTop: 1000 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 1000, 'the reader\'s saved place outranks an arrival anchor')
+})
+
+check('a turn still in flight is read from its end, not anchored to its prompt', () => {
+  statusFeed.put('s1', { running: true })
+  arriveInputRow({ session: 's1', top: 380, height: 120 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 4200, 'the live tail stays where the shell put it')
+})
+
+check('a prompt taller than the screen is anchored by its end, with its answer in reach', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  // A 1100px prompt at content y=3600, scrolled out of a viewport whose floor
+  // is 8200: anchoring its top would leave the answer entirely off screen.
+  arriveInputRow({ session: 's1', scrollHeight: 9000, top: -4500, height: 1100 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 4636, 'the prompt\'s last line and a line of context stand above the answer')
+})
+
+check('the same conversation arriving again is not re-anchored', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  arriveInputRow({ session: 's1', scrollHeight: 9000, top: -2100, height: 120 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 5984)
+  // A status tick that republishes the same main view is not a new arrival.
+  transcript.scrollTop = 8200
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 8200, 'the arrival already answered stays answered')
+})
+
+check('the wheel before the page settles keeps the position the reader made', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  arriveInputRow({ session: 's1', scrollHeight: 9000, top: -2100, height: 120 })
+  currentBinding.open('s1')
+  clock.advance(16)
+  wheel()
+  clock.advance(200)
+  assert.equal(transcript.scrollTop, 8200, 'a reading gesture outranks an anchor nobody asked for')
+})
+
+check('leaving the conversation and coming back makes it an arrival again', () => {
+  statusFeed.put('s1', { running: false, completionUnread: true })
+  arriveInputRow({ session: 's1', scrollHeight: 9000, top: -2100, height: 120 })
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 5984)
+  currentBinding.open('')
+  transcript.scrollTop = 8200
+  currentBinding.open('s1')
+  clock.advance(80)
+  assert.equal(transcript.scrollTop, 5984, 'a second visit is read from the same boundary')
 })
 
 console.log(`\nselftest: ${checks} checks passed`)
