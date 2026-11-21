@@ -7264,6 +7264,83 @@ await checkAsync('the goal plus asks for a title and a body, then opens a conver
   assert.equal(fakeWindow.__dshVim.board().open, false, 'the board gets out of the way')
 })
 
+await checkAsync('a title on its own stands a conversation up, with nothing said yet', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a'] }])
+  seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  newSessions.results.push('quiet')
+  tap('j')
+  clickThrough(boardSeat(boardBlock('dsh-vim'), 'goalNewSession'))
+  const sheet = boardSeat(boardPanel(), 'newSessionSheet')
+  assert.ok(sheet, 'the sheet is up')
+  clickThrough(boardSeat(sheet, 'newSessionConfirm'))
+  await flush()
+  assert.deepEqual(newSessions.calls, [], 'an empty sheet is not a request')
+  assert.ok(boardSeat(boardPanel(), 'newSessionSheet'), 'it stays up instead')
+  typeIn(boardSeat(sheet, 'newSessionTitle'), '把登录改完')
+  clickThrough(boardSeat(sheet, 'newSessionConfirm'))
+  await flush()
+  assert.deepEqual(newSessions.calls, [{ workspaceId: 'w1' }], "the conversation is still made in the goal's workspace")
+  assert.equal(newSessions.prompts.length, 0, 'a title with no body has no message to send')
+  assert.deepEqual(opened, ['quiet'], 'and the new conversation is what opens')
+  assert.equal(renames.calls.filter((call) => call.id === 'quiet' && call.title).length, 1, 'named once, by the title that was written')
+  assert.equal(renames.calls.find((call) => call.id === 'quiet').title, '把登录改完', 'the title the reader typed names it')
+  assert.equal(boardDoc().placed.quiet, 'w1', 'filed under the goal the plus was on')
+  assert.equal(fakeWindow.__dshVim.board().open, false, 'the board gets out of the way')
+})
+
+await checkAsync('the new-conversation sheet can choose the model the conversation starts on', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a'] }])
+  seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  MODEL.offer(CATALOG)
+  useFavorites(FAVORITES)
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-chat' })
+  newSessions.results.push('choosy')
+  tap('j')
+  clickThrough(boardSeat(boardBlock('dsh-vim'), 'goalNewSession'))
+  const sheet = boardSeat(boardPanel(), 'newSessionSheet')
+  const row = boardSeat(sheet, 'newSessionModel')
+  assert.ok(row, 'the sheet carries a row for the model')
+  assert.equal(
+    boardSeat(row, 'newSessionModelName').textContent,
+    expectedLabel('boardNewSessionModelDefault'),
+    'which starts on whatever the host would use'
+  )
+  clickThrough(row)
+  await flush()
+  assert.notEqual(modelPickPanel(), null, "a press opens the page's own model window")
+  assert.equal(modelPickRows().length, 3, 'with the configured list on it')
+  assert.deepEqual(MODEL.calls, [], 'opening it submits nothing')
+  tap('Escape')
+  assert.equal(modelPickPanel(), null, 'escape takes only the window down')
+  assert.ok(boardSeat(boardPanel(), 'newSessionSheet'), 'the sheet is still up behind it')
+  clickThrough(row)
+  await flush()
+  tap('d')
+  tap('w')
+  await flush()
+  assert.equal(modelPickPanel(), null, 'confirming takes the window down')
+  assert.deepEqual(MODEL.calls, [], 'and still submits nothing: there is no conversation yet')
+  const named = boardSeat(boardSeat(boardPanel(), 'newSessionSheet'), 'newSessionModelName')
+  assert.equal(named.textContent, 'DeepSeek Reasoner', 'the row now names the model that was chosen')
+  const openSheet = boardSeat(boardPanel(), 'newSessionSheet')
+  typeIn(boardSeat(openSheet, 'newSessionTitle'), '把登录改完')
+  typeIn(boardSeat(openSheet, 'newSessionBody'), '先看错误提示')
+  clickThrough(boardSeat(openSheet, 'newSessionConfirm'))
+  await flush()
+  assert.deepEqual(
+    MODEL.calls,
+    [{ provider: 'deepseek', model: 'deepseek-reasoner' }],
+    'the chosen model is submitted to the conversation that was made'
+  )
+  assert.equal(newSessions.prompts.length, 1, 'and the words go out on it')
+  assert.deepEqual(newSessions.prompts[0].content, [{ type: 'text', text: '先看错误提示' }])
+  assert.deepEqual(opened, ['choosy'], 'the new conversation is what opens')
+  assert.ok(
+    renames.calls.some((call) => call.id === 'choosy' && call.title === '把登录改完'),
+    'named as before, by the title that was written'
+  )
+})
+
 await checkAsync('a card dropped on the goal plus starts a conversation from its words', async () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a'] }])
   seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(2) }])

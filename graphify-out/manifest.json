@@ -1,0 +1,32 @@
+{
+  "dsh.plugin.json": {
+    "mtime": 1795157731.6923304,
+    "seen": 1795184782.5044127,
+    "ast_hash": "be92a0e2a7944c24c17e6a2d8997fb06",
+    "semantic_hash": "be92a0e2a7944c24c17e6a2d8997fb06"
+  },
+  "lib/client.js": {
+    "mtime": 1795166269.9202857,
+    "seen": 1795184782.5044127,
+    "ast_hash": "9ce3d7d231a970f8382954ca05237fb3",
+    "semantic_hash": "9ce3d7d231a970f8382954ca05237fb3"
+  },
+  "lib/index.js": {
+    "mtime": 1790675644.1205108,
+    "seen": 1795184782.5044127,
+    "ast_hash": "c8212c9740e0883b1ce26c41d671ec60",
+    "semantic_hash": "c8212c9740e0883b1ce26c41d671ec60"
+  },
+  "package.json": {
+    "mtime": 1795169710.3241944,
+    "seen": 1795184782.5044127,
+    "ast_hash": "b9a702770dfb3dfb4bd463b5f8dbef64",
+    "semantic_hash": "b9a702770dfb3dfb4bd463b5f8dbef64"
+  },
+  "tools/selftest.mjs": {
+    "mtime": 1795167217.9685495,
+    "seen": 1795184782.5044127,
+    "ast_hash": "98e404f1d73dc6917eb712fad6a715d7",
+    "semantic_hash": "98e404f1d73dc6917eb712fad6a715d7"
+  }
+}
