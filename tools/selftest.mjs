@@ -6665,6 +6665,25 @@ function blockHead(block) {
   return block.children[0]
 }
 
+/** A goal's ⋯ mark, or null when the panel has none (the tray). */
+function goalMenuMark(block) {
+  return boardSeat(block, 'goalMenuOpen')
+}
+
+/**
+ * Open a goal's ⋯ menu and return it.
+ *
+ * The menu is drawn on the paper beside the panel rather than inside it, so it
+ * is found from the stage, not by walking the block.
+ * @param {object} block - the panel whose ⋯ is pressed.
+ * @returns {object|null} the open menu.
+ */
+function openGoalMenu(block) {
+  fireOn(goalMenuMark(block), 'click', { type: 'click', stopPropagation() {} })
+  const menus = boardStage().querySelectorAll('[data-role="goalMenu"]')
+  return menus[menus.length - 1] ?? null
+}
+
 /**
  * A press that may become a drag, delivered the way the DOM delivers one.
  *
@@ -6786,6 +6805,7 @@ check('a card is a way in: a press on it opens the conversation', () => {
   const card = cardsIn(boardBlock(expectedLabel('boardInbox')))[0]
   assert.ok(card, 'the inbox must show the conversation')
   assert.equal(String(boardSeat(card, 'cardTitle').textContent), 'a task', 'the card leads with the conversation\'s name')
+  assert.equal(boardSeat(card, 'cardTitle').style.minHeight, '2.8em', 'the title keeps two lines even when its name is shorter')
   // The largest target on the canvas carries the most likely action: the name is
   // part of the card, so a press on it is a press on the conversation.
   clickThrough(boardSeat(card, 'cardTitle'))
@@ -8003,6 +8023,107 @@ check('a card mark opens the list already filtered to that conversation', () => 
   tap('Escape')
 })
 
+check('a panel stands the cards still warm above a rule, and the rest under it', () => {
+  // The whole rule is about one day, so the check pins the clock to 15:00: an
+  // hour inside a day is the only thing that makes "five hours ago" mean
+  // "earlier today" whenever the suite happens to run.
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  registry.publish([], [{
+    workspaceId: 'w1',
+    title: 'one',
+    path: '/work/one',
+    sessionIds: ['run', 'done', 'early1', 'early2', 'early3'],
+  }])
+  statusFeed.put('run', { running: true })
+  statusFeed.put('done', { running: false, completionUnread: true })
+  seed([
+    // 11:00, four hours ago, and still warm: a turn in flight is not a clock.
+    { id: 'run', displayTitle: 'running', updatedAt: ago(4) },
+    // 10:00: finished today and nobody has opened it.
+    { id: 'done', displayTitle: 'finished', updatedAt: ago(5) },
+    // 09:00 and older: today's work, no longer the thing being worked in.
+    { id: 'early1', displayTitle: 'early one', updatedAt: ago(6) },
+    { id: 'early2', displayTitle: 'early two', updatedAt: ago(7) },
+    { id: 'early3', displayTitle: 'early three', updatedAt: ago(8) },
+  ])
+  tap('j')
+  const grid = boardSeat(boardBlock('one'), 'blockColumns')
+  const drawn = grid.children.map((node) => {
+    const role = node.__attrs ? node.__attrs['data-role'] : ''
+    return role === 'panelRule' ? 'rule' : String(node.__attrs && node.__attrs['data-column'])
+  })
+  assert.deepEqual(drawn, ['run', 'done', 'rule', 'early1', 'early2', 'early3'],
+    'the warm two stand first, then the rule, then what today already used up')
+  const rule = boardSeat(boardBlock('one'), 'panelRule')
+  assert.equal(String(boardSeat(rule, 'panelRuleText').textContent), expectedLabel('boardRestBefore') + '3' + expectedLabel('boardRestAfter'),
+    'the rule says how much stands under it')
+  // Two warm cards leave one slot of the row: the rule takes exactly that one,
+  // so the first card under it cannot stand beside it.
+  assert.equal(rule.style.flex, '0 0 280px', 'the rule fills the row the warm cards left')
+  tap('Escape')
+  now = was
+})
+
+check('a warm row already full gives the rule a row of its own', () => {
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  registry.publish([], [{
+    workspaceId: 'w1',
+    title: 'one',
+    path: '/work/one',
+    sessionIds: ['a', 'b', 'c', 'early1', 'early2'],
+  }])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
+    { id: 'b', displayTitle: 'b', updatedAt: ago(2) },
+    { id: 'c', displayTitle: 'c', updatedAt: ago(3) },
+    { id: 'early1', displayTitle: 'early one', updatedAt: ago(6) },
+    { id: 'early2', displayTitle: 'early two', updatedAt: ago(7) },
+  ])
+  tap('j')
+  const rule = boardSeat(boardBlock('one'), 'panelRule')
+  assert.equal(rule.style.flex, '0 0 100%', 'a full warm row pushes the rule onto its own line')
+  assert.equal(boardSeat(boardBlock('one'), 'blockColumns').children.indexOf(rule), 3,
+    'which stands after the third card and before the rest')
+  tap('Escape')
+  now = was
+})
+
+check('a panel of three has no rule to draw', () => {
+  const was = now
+  const midnight = new Date(Date.now())
+  midnight.setHours(0, 0, 0, 0)
+  now = midnight.getTime() + 15 * HOUR
+  registry.publish([], [{
+    workspaceId: 'w1',
+    title: 'one',
+    path: '/work/one',
+    sessionIds: ['run', 'early1', 'early2'],
+  }])
+  statusFeed.put('run', { running: true })
+  seed([
+    { id: 'run', displayTitle: 'running', updatedAt: ago(4) },
+    { id: 'early1', displayTitle: 'early one', updatedAt: ago(6) },
+    { id: 'early2', displayTitle: 'early two', updatedAt: ago(7) },
+  ])
+  tap('j')
+  // Three is one row: the eye takes all three at once, and a rule would only
+  // cost the panel a line to say what the row already says.
+  assert.equal(boardSeat(boardBlock('one'), 'panelRule'), null, 'nothing to divide')
+  assert.deepEqual(
+    boardSeat(boardBlock('one'), 'blockColumns').children.map((node) => node.__attrs['data-column']),
+    ['run', 'early1', 'early2'],
+    'and the order is the one the panel remembers'
+  )
+  tap('Escape')
+  now = was
+})
+
 check('a conversation with no goal wears no goal colour', () => {
   // A workspace owns no conversations today, so the one on the board is the
   // tray's: the tray is where work has no home, and a hue would be claiming one.
@@ -8321,13 +8442,25 @@ check('the three right presses that keep their meaning', () => {
   tap('Escape')
 })
 
-check('a goal is named by the reader, and the name is remembered', () => {
+check('a goal is named from its ⋯ menu, and the name is remembered', () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a'] }])
   seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(2) }])
   tap('j')
+  // The name's own press folds; renaming is one deliberate press further away,
+  // behind the ⋯. A double press on the name must open no field: the two
+  // presses are two folds, not a host write.
   fireOn(boardSeat(boardBlocks()[0], 'blockName'), 'dblclick', { type: 'dblclick', stopPropagation() {} })
+  assert.equal(boardSeat(boardBlocks()[0], 'blockRename'), null, 'a double press on the name opens no field')
+  const menu = openGoalMenu(boardBlocks()[0])
+  assert.ok(menu, 'the ⋯ opens a menu')
+  assert.equal(goalMenuMark(boardBlocks()[0]).getAttribute('aria-expanded'), 'true', 'and the mark says so')
+  const rename = boardSeat(menu, 'goalRenameOpen')
+  assert.ok(rename, 'rename is one of its verbs')
+  fireOn(rename, 'click', { type: 'click', stopPropagation() {} })
   const field = boardSeat(boardBlocks()[0], 'blockRename')
   assert.ok(field, 'the heading becomes a field')
+  assert.equal(fakeDocument.activeElement, field, 'and it takes the keyboard')
+  assert.equal(boardStage().querySelectorAll('[data-role="goalMenu"]').length, 0, 'the menu goes with the choice')
   assert.equal(field.value, 'dsh-vim', 'carrying the name it had')
   typeIn(field, '  把登录改完  ')
   pressIn(field, 'Enter')
@@ -8337,7 +8470,7 @@ check('a goal is named by the reader, and the name is remembered', () => {
   tap('j')
   assert.ok(boardBlock('把登录改完'), 'the next board opens with that name')
   // A name is a thing the reader chose; giving it back is how it is taken off.
-  fireOn(boardSeat(boardBlocks()[0], 'blockName'), 'dblclick', { type: 'dblclick', stopPropagation() {} })
+  fireOn(boardSeat(openGoalMenu(boardBlocks()[0]), 'goalRenameOpen'), 'click', { type: 'click', stopPropagation() {} })
   const again = boardSeat(boardBlocks()[0], 'blockRename')
   typeIn(again, '   ')
   pressIn(again, 'Enter')
@@ -8346,6 +8479,34 @@ check('a goal is named by the reader, and the name is remembered', () => {
   tap('Escape')
 })
 
+
+
+check('a goal menu is one at a time, and Escape puts it away', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['a'] },
+    { workspaceId: 'w2', title: 'two', path: '/work/two', sessionIds: ['b'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'a task', updatedAt: todayAt(3) },
+    { id: 'b', displayTitle: 'b task', updatedAt: todayAt(2) },
+  ])
+  tap('j')
+  const menus = () => boardStage().querySelectorAll('[data-role="goalMenu"]').length
+  const firstMark = goalMenuMark(boardBlock('one'))
+  openGoalMenu(boardBlock('one'))
+  assert.equal(menus(), 1, 'the ⋯ opens one menu')
+  fireOn(firstMark, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(menus(), 0, 'the same ⋯ puts it away')
+  assert.equal(firstMark.getAttribute('aria-expanded'), 'false', 'and the mark goes quiet')
+  openGoalMenu(boardBlock('one'))
+  openGoalMenu(boardBlock('two'))
+  assert.equal(menus(), 1, 'a second goal\'s ⋯ takes the first menu away')
+  assert.equal(goalMenuMark(boardBlock('two')).getAttribute('aria-expanded'), 'true', 'and says which menu is open')
+  tap('Escape')
+  assert.equal(menus(), 0, 'Escape puts the menu away')
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'without closing the board')
+  tap('Escape')
+})
 
 check('a note that says nothing is not kept', () => {
   seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(2) }])
@@ -8926,14 +9087,17 @@ check('a press on a card carries the card, never the goal under it', () => {
   tap('Escape')
 })
 
-check('a single press on a goal name no longer folds it', () => {
+check('a press on a goal name folds the panel, and another brings it back', () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['a'] }])
   seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(3) }])
   tap('j')
-  fireOn(boardSeat(boardBlock('one'), 'blockName'), 'click', { type: 'click', stopPropagation() {} })
-  assert.equal(fakeWindow.__dshVim.board().blocks[0].folded, false, 'folding belongs to the caret')
-  fireOn(boardSeat(boardBlock('one'), 'blockFold'), 'click', { type: 'click' })
-  assert.equal(fakeWindow.__dshVim.board().blocks[0].folded, true, 'and the caret still folds')
+  const name = () => boardSeat(boardBlock('one'), 'blockName')
+  fireOn(name(), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().blocks[0].folded, true, 'a press on the name folds the panel')
+  assert.equal(cardsIn(boardBlock('one')).length, 0, 'and its conversations go with the fold')
+  fireOn(name(), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.board().blocks[0].folded, false, 'another press unfolds it again')
+  assert.equal(cardsIn(boardBlock('one')).length, 1, 'and the conversations are back')
   tap('Escape')
 })
 
@@ -8942,7 +9106,7 @@ check("a press inside a field is the field's, not a gesture", () => {
   seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(3) }])
   tap('j')
   const before = fakeWindow.__dshVim.board().places.w1
-  fireOn(boardSeat(boardBlock('one'), 'blockName'), 'dblclick', { type: 'dblclick', stopPropagation() {} })
+  fireOn(boardSeat(openGoalMenu(boardBlock('one')), 'goalRenameOpen'), 'click', { type: 'click', stopPropagation() {} })
   pressForDrag(boardSeat(boardBlocks()[0], 'blockRename'), 10, 10)
   dragTo(200, 200)
   assert.deepEqual(fakeWindow.__dshVim.board().places.w1, before, 'the field kept the press, so the goal stayed')
@@ -9129,10 +9293,12 @@ check('a line of the tray is lifted back out onto the paper', () => {
   tap('Escape')
 })
 
-check('the tray is not a goal: its name cannot be changed', () => {
+check('the tray is not a goal: it has no ⋯ and its name cannot be changed', () => {
   seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(2) }])
   tap('j')
-  fireOn(boardSeat(boardBlock(expectedLabel('boardInbox')), 'blockName'), 'dblclick', { type: 'dblclick', stopPropagation() {} })
+  const tray = boardBlock(expectedLabel('boardInbox'))
+  assert.equal(goalMenuMark(tray), null, 'the tray carries no ⋯')
+  fireOn(boardSeat(tray, 'blockName'), 'dblclick', { type: 'dblclick', stopPropagation() {} })
   assert.equal(boardSeat(boardBlocks()[0], 'blockRename'), null, 'no field opens on the tray')
   tap('Escape')
 })
