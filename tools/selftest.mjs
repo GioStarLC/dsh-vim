@@ -73,10 +73,29 @@ const clock = {
    * @param {Function} [onSlice] - called after each slice, for sampling.
    */
   advance(ms, onSlice) {
+    // Watching time is for animations, and an animation lasts seconds. A span
+    // this wide with nothing queued is a check that wants the date to change,
+    // not the frames in between: that is `jump`, and saying so beats running
+    // five million slices until the heap gives out.
+    if (frames.length === 0 && ms > 10 * 60 * 1000) {
+      throw new Error(
+        `clock.advance(${ms}) crosses ${Math.round(ms / 60000)} minutes with no animation queued: use clock.jump(${ms})`
+      )
+    }
     const end = now + ms
     let stuck = 0
+    let turns = 0
     while (now < end) {
       const was = now
+      // An advance that needs more than a million turns is not an animation any
+      // more: it is something rescheduling itself just ahead of the clock, and
+      // it has to fail the check that made it rather than run for hours.
+      if (++turns > 1000000) {
+        throw new Error(
+          `clock.advance(${ms}) gave up after ${turns} turns: at +${now - was} ms of ${ms}, ` +
+            `${timers.length} timers and ${frames.length} frames still queued`
+        )
+      }
       if (frames.length === 0) {
         // Something already due is not something to jump past: leave the clock
         // where it is and let the fire loop below take it.
@@ -117,6 +136,40 @@ const clock = {
       }
     }
     now = end
+  },
+
+  /**
+   * Cross a span nobody is watching, firing what fell due on the way once.
+   *
+   * `advance` is the honest way to watch time pass, and it pays for watching:
+   * a board that keeps a running clock re-arms a 1.5 s tick, so crossing a day
+   * with it means 57,600 ticks. A check that only needs the day to have turned
+   * over says so here: the clock moves in one step, and every timer armed for
+   * that span fires once, in the order it was armed.
+   * @param {number} ms - milliseconds to cross.
+   * @returns {void}
+   */
+  crossTo(end) {
+    now = end
+    const due = timers.filter((t) => t.at <= end).sort((a, b) => a.at - b.at)
+    for (const t of due) {
+      const i = timers.indexOf(t)
+      if (i >= 0) timers.splice(i, 1)
+      t.fn()
+    }
+    // Nothing watched the frames in that span, so none of them are owed.
+    frames.length = 0
+    now = end
+  },
+
+  /** Cross `ms` of time nobody watches: the one way a check changes the day. */
+  jump(ms) {
+    this.crossTo(now + ms)
+  },
+
+  /** Put the wall clock at `ts`, firing what fell due on the way once. */
+  setNow(ts) {
+    this.crossTo(ts)
   },
 }
 
@@ -260,7 +313,12 @@ function el(opts = {}) {
     // it ever calls on a subtree.
     querySelectorAll(selector) {
       const out = []
+      const seen = new Set()
       const walk = (n) => {
+        // Same reason as `boardSeat`: a node reachable twice must be walked
+        // once, or a shared subtree turns this into an unbounded walk.
+        if (!n || seen.has(n)) return
+        seen.add(n)
         for (const child of n.children || []) {
           if (matches(child, selector)) out.push(child)
           walk(child)
@@ -1402,6 +1460,9 @@ function expectedLabel(key) {
 }
 
 let checks = 0
+// The most heap any one check left behind, and which check it was: an OOM
+// should name the check that grew, not just kill the process.
+const peak = { heap: 0, label: '' }
 
 /**
  * Put every piece of shared state back where a check expects it, so no check
@@ -1474,10 +1535,40 @@ function reset() {
   resetHitTest()
 }
 
-/** Run one synchronous check against a clean state. */
+/**
+ * Take the page down and prove it went.
+ *
+ * A check is a page: it opens windows, writes cards and leaves timers armed.
+ * The next check must inherit none of that, and "must not" is not something to
+ * keep in a hand-written list - `reset` grew one, and it silently missed the
+ * clock's own queues. So the teardown is total here, and a window the plugin
+ * was stopped from taking down is a failure carrying the check's name rather
+ * than a slow leak a hundred checks later.
+ * @param {string} label - the check that just ran.
+ * @returns {void}
+ */
+function finish(label) {
+  const mounted = body.children.length
+  // A check that disposed the plugin itself has already done the work, and
+  // taken the api with it.
+  const api = fakeWindow.__dshVim
+  if (api && typeof api.stop === 'function') api.stop()
+  const left = body.children.length
+  timers.length = 0
+  frames.length = 0
+  const used = process.memoryUsage().heapUsed
+  if (used > peak.heap) {
+    peak.heap = used
+    peak.label = label
+  }
+  assert.equal(left, 0, `"${label}" left ${left} of ${mounted} nodes on the page after the plugin was stopped`)
+}
+
+/** Run one synchronous check against a clean state, and leave one behind. */
 function check(label, fn) {
   reset()
   fn()
+  finish(label)
   checks++
   console.log(`  ok  ${label}`)
 }
@@ -1489,6 +1580,7 @@ function check(label, fn) {
 async function checkAsync(label, fn) {
   reset()
   await fn()
+  finish(label)
   checks++
   console.log(`  ok  ${label}`)
 }
@@ -6549,10 +6641,20 @@ function boardDoc() {
 }
 
 /** A named seat inside one node, at any depth. */
-function boardSeat(node, role) {
+function boardSeat(node, role, seen) {
+  // A fake element can end up in more than one parent's children (appendChild
+  // does not detach it from the old one), so this walk carries the set of nodes
+  // it has already been through. Without it a shared or cyclic subtree is not
+  // a wrong answer, it is an infinite one — and an infinite walk fills the heap.
+  const visited = seen || new Set()
+  if (!node || visited.has(node)) return null
+  visited.add(node)
+  // A walk longer than this is not looking at a card any more: it is looking at
+  // the whole page, and it would fill the heap before it answered.
+  if (visited.size > 200000) throw new Error(`boardSeat('${role}') walked ${visited.size} nodes without finding one`)
   for (const child of node.children || []) {
     if (child.__attrs && child.__attrs['data-role'] === role) return child
-    const found = boardSeat(child, role)
+    const found = boardSeat(child, role, visited)
     if (found) return found
   }
   return null
@@ -10452,7 +10554,7 @@ await checkAsync('a page is filed when the day turns over, in the words it was d
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
   seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
   tap('j')
-  clock.advance(24 * HOUR)
+  clock.jump(24 * HOUR)
   await flush()
   const days = await fakeWindow.__dshVim.history()
   assert.equal(days.length, 1, 'one page for one day of drawing')
@@ -10470,7 +10572,7 @@ await checkAsync('a conversation carried in stays on the board and says how long
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
   seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
   tap('j')
-  clock.advance(24 * HOUR)
+  clock.jump(24 * HOUR)
   await flush()
   await flush()
   const card = boardBlocks().flatMap((block) => cardsIn(block))[0]
@@ -10496,7 +10598,7 @@ await checkAsync('a page is copied into today, and the page itself is never writ
   stored.set(key, JSON.stringify(drawn))
   tap('Escape')
   tap('j')
-  clock.advance(24 * HOUR)
+  clock.jump(24 * HOUR)
   await flush()
   const days = await fakeWindow.__dshVim.history()
   const filed = await fakeWindow.__dshVim.history(days[0])
@@ -10558,7 +10660,7 @@ await checkAsync('the history panel reads a day back, and arming it writes nothi
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
   seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
   tap('j')
-  clock.advance(24 * HOUR)
+  clock.jump(24 * HOUR)
   await flush()
   const days = await fakeWindow.__dshVim.history()
   const filed = await fakeWindow.__dshVim.history(days[0])
@@ -10656,13 +10758,18 @@ check('a thought filed under a conversation is one line, and the newest sits on 
   seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
   tap('j')
   const fileOne = (text) => {
+    console.error('[dbg] fileOne start', text, Math.round(process.memoryUsage().heapUsed / 1e6) + 'MB')
     fireOn(writeCardButton(), 'click', { type: 'click' })
+    console.error('[dbg] wrote card', Math.round(process.memoryUsage().heapUsed / 1e6) + 'MB')
     typeIn(boardSeat(looseCards()[0], 'cardTitleInput'), text)
     fireOn(boardSeat(looseCards()[0], 'cardTitleInput'), 'blur', { type: 'blur' })
     aimAt(cardsIn(boardBlock('dsh-vim'))[0])
+    console.error('[dbg] aimed', Math.round(process.memoryUsage().heapUsed / 1e6) + 'MB')
     pressForDrag(looseCards()[0].children[0], 10, 10)
     dragTo(300, 200)
+    console.error('[dbg] dragged', Math.round(process.memoryUsage().heapUsed / 1e6) + 'MB')
     resetHitTest()
+    console.error('[dbg] fileOne done', Math.round(process.memoryUsage().heapUsed / 1e6) + 'MB')
   }
   fileOne('先写的一句')
   fileOne('后写的一句')
@@ -10670,15 +10777,25 @@ check('a thought filed under a conversation is one line, and the newest sits on 
   const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
   assert.equal(held.length, 2, 'both thoughts are filed under the conversation')
   assert.equal(held[0].__attrs['data-compact'], 'true', 'a filed thought is drawn as one line')
-  assert.equal(boardSeat(held[0], 'looseText'), null, 'with no body line spent on it')
+  assert.equal(Boolean(boardSeat(held[0], 'looseText')), false, 'with no body line spent on it')
   assert.equal(String(boardSeat(held[0], 'looseTitle').textContent), '后写的一句', 'the newest filing sits on top')
-  // The rest of the card's verbs live behind the ⋯.
-  fireOn(boardSeat(held[0], 'cardMenuOpen'), 'click', { type: 'click', stopPropagation() {} })
+  // The rest of the card's verbs live behind the ⋯. The two filings above left
+  // the hand mid-carry, and a click straight after a drag is that drag's
+  // leftover rather than a request, so the mark is pressed before it is
+  // clicked — the same idiom every other mark on the board is tapped with.
+  tapMark(boardSeat(held[0], 'cardMenuOpen'))
   const menu = boardSeat(held[0], 'ideaMenu')
-  assert.ok(menu, 'the ⋯ opens its own menu')
-  assert.ok(boardSeat(menu, 'ideaMenuOpen'), 'with a way to the whole note')
+  assert.equal(Boolean(menu), true, 'the ⋯ opens its own menu')
+  assert.equal(Boolean(boardSeat(menu, 'ideaMenuOpen')), true, 'with a way to the whole note')
+  // Writing the two thoughts left the caret in a card's field, and the board
+  // withholds its keys from a field while one is being typed into: the page has
+  // to have the keyboard back before Escape can mean "put this menu away".
+  fakeDocument.activeElement = body
   tap('Escape')
-  assert.equal(boardSeat(held[0], 'ideaMenu'), null, 'and Escape puts it away without closing the board')
+  // The press was made on the paint before this one, so what Escape is asked
+  // about is the board itself: the menu is gone from it, and it is still up.
+  assert.equal(Boolean(boardSeat(boardBlock('dsh-vim'), 'ideaMenu')), false, 'and Escape puts it away without closing the board')
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'the board itself stays up')
   tap('Escape')
 })
 
@@ -10700,7 +10817,9 @@ check('the 投入 button pastes the thought and leaves a finished trace', () => 
   }
   const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
   const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
-  fireOn(boardSeat(held, 'cardDeliver'), 'click', { type: 'click', stopPropagation() {} })
+  // The drop just above left the hand mid-carry, so the mark is pressed before
+  // it is clicked: a click straight after a drag belongs to that drag.
+  tapMark(boardSeat(held, 'cardDeliver'))
   assert.equal(pasted && pasted.command, 'insertText', 'the words are pasted as typing')
   assert.equal(pasted && pasted.text, '把这句话发过去', "the thought's own words")
   assert.equal(boardDoc().cards[0].done, true, 'and the card is marked delivered')
@@ -10724,9 +10843,18 @@ check('a conversation is sorted across its panel by dragging it', () => {
   assert.deepEqual(boardDoc().order.w1, ['a', 'b'], 'the panel starts in the order it was drawn in')
   // Take the second conversation past the first one's middle, then let go.
   pressForDrag(cardsIn(columns[1])[0], 400, 200)
+  // Letting go asks the page what is under the hand, so the hit test is pointed
+  // at the column the conversation is being taken to.
+  aimAt(columns[0])
   dragTo(40, 200)
   assert.deepEqual(boardDoc().order.w1, ['b', 'a'], 'the order the hand chose is written down')
   tap('Escape')
 })
 
 console.log(`\nselftest: ${checks} checks passed`)
+// Attribution, on the way out either way: an OOM or a failed assertion should
+// still say which check was the greediest.
+process.on('exit', () => {
+  if (!peak.label) return
+  console.log(`peak heap: ${Math.round(peak.heap / 1048576)} MB, left by "${peak.label}"`)
+})
