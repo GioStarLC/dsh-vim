@@ -436,10 +436,102 @@ function press(target) {
 /** Minimal localStorage stand-in. */
 const stored = new Map()
 const fakeStorage = {
+  // Set to prove what a full store does: every write throws until it is cleared.
+  fail: false,
   getItem: (key) => (stored.has(key) ? stored.get(key) : null),
-  setItem: (key, value) => void stored.set(key, String(value)),
+  setItem: (key, value) => {
+    if (fakeStorage.fail) {
+      const error = new Error('the quota is exhausted')
+      error.name = 'QuotaExceededError'
+      throw error
+    }
+    stored.set(key, String(value))
+  },
   removeItem: (key) => void stored.delete(key),
   clear: () => void stored.clear(),
+}
+
+/**
+ * A minimal IndexedDB stand-in.
+ *
+ * The history is one record per day in a database of its own, and the suite has
+ * to be able to file a page, read it back, and prove that a page it was not asked
+ * to write is still exactly as it was. Only what the plugin asks for is here:
+ * open, a store per name, get / put / delete / getAllKeys, and callbacks that run
+ * on a microtask the way a browser's own do.
+ */
+const fakeDatabases = new Map()
+
+/** One request, answered on a microtask. */
+function fakeRequest() {
+  const request = { result: undefined, error: null, onsuccess: null, onerror: null }
+  request.answer = (value) => {
+    queueMicrotask(() => {
+      request.result = value
+      if (typeof request.onsuccess === 'function') request.onsuccess({ target: request })
+    })
+    return request
+  }
+  return request
+}
+
+/** One store, keyed by its own keyPath so a date can be filed over. */
+function fakeStoreApi(entry) {
+  const keyOf = (value) => (entry.keyPath === 'k' ? value.k : value.date)
+  return {
+    get: (key) => fakeRequest().answer(entry.records.get(key)),
+    getAllKeys: () => fakeRequest().answer([...entry.records.keys()]),
+    put: (value) => {
+      const key = keyOf(value)
+      entry.records.set(key, value)
+      return fakeRequest().answer(key)
+    },
+    delete: (key) => {
+      entry.records.delete(key)
+      return fakeRequest().answer(undefined)
+    },
+  }
+}
+
+const fakeIndexedDB = {
+  open(name, version) {
+    const request = { result: null, error: null, onsuccess: null, onerror: null, onupgradeneeded: null }
+    let db = fakeDatabases.get(name)
+    if (!db) {
+      db = { version: 0, stores: new Map() }
+      fakeDatabases.set(name, db)
+    }
+    const wanted = Number(version) || 1
+    const upgrade = wanted > db.version
+    db.version = Math.max(db.version, wanted)
+    const api = {
+      objectStoreNames: { contains: (each) => db.stores.has(each) },
+      createObjectStore(storeName, options) {
+        const entry = { keyPath: (options && options.keyPath) || null, records: new Map() }
+        db.stores.set(storeName, entry)
+        return fakeStoreApi(entry)
+      },
+      transaction(storeNames) {
+        const names = Array.isArray(storeNames) ? storeNames : [storeNames]
+        const transaction = { error: null, onabort: null, oncomplete: null, onerror: null }
+        transaction.objectStore = (storeName) => {
+          if (!names.includes(storeName)) throw new Error('store not in this transaction: ' + storeName)
+          const entry = db.stores.get(storeName)
+          if (!entry) throw new Error('no such store: ' + storeName)
+          return fakeStoreApi(entry)
+        }
+        return transaction
+      },
+      close() {},
+      onversionchange: null,
+    }
+    queueMicrotask(() => {
+      request.result = api
+      if (upgrade && typeof request.onupgradeneeded === 'function') request.onupgradeneeded({ target: request })
+      if (typeof request.onsuccess === 'function') request.onsuccess({ target: request })
+    })
+    return request
+  },
 }
 
 let mediaReduce = false
@@ -447,6 +539,11 @@ const fakeWindow = {
   innerWidth: 1200,
   innerHeight: 900,
   localStorage: fakeStorage,
+  indexedDB: fakeIndexedDB,
+  URL: { createObjectURL: () => 'blob:history', revokeObjectURL: () => {} },
+  FileReader: function () {
+    this.readAsText = () => {}
+  },
   addEventListener: record,
   removeEventListener: unrecord,
   setTimeout: clock.setTimeout,
@@ -1249,7 +1346,7 @@ const SHIPPED = {
   switchBlurs: true,
   sendBlurs: true,
   sendMode: 'host',
-  snapshotKeepDays: 90,
+  snapshotKeepDays: 3650,
   favorites: [],
 }
 
@@ -1301,6 +1398,13 @@ function reset() {
   // check that writes one must not hand the next one a line it did not write:
   // "nothing is filed" is an assertion that needs an empty store to mean it.
   for (const key of [...stored.keys()]) if (key.includes('/notes/')) stored.delete(key)
+  // The day boundary keeps its own keys, and its pages in a database: a check
+  // that files a day must not hand the next one a page it did not write.
+  for (const key of [...stored.keys()]) if (key.includes('/history/')) stored.delete(key)
+  for (const db of fakeDatabases.values()) {
+    for (const entry of db.stores.values()) entry.records.clear()
+  }
+  fakeStorage.fail = false
   opened.length = 0
   transcript.scrollTop = 0
   sidebar.scrollTop = 0
@@ -6395,8 +6499,10 @@ function boardHeading() {
  * @returns {object|null} the stored board, or null when none was written.
  */
 function boardDoc() {
+  // The board's own key, named exactly: the history keeps its pages and its
+  // carried set beside this plugin too, and the first of those is not the board.
   for (const key of stored.keys()) {
-    if (key.includes('/board/')) return JSON.parse(stored.get(key))
+    if (key.endsWith('/board/v1')) return JSON.parse(stored.get(key))
   }
   return null
 }
@@ -6856,7 +6962,10 @@ check('tidy gathers the untied cards into the inbox, and leaves every panel wher
   const state = fakeWindow.__dshVim.board()
   assert.equal(JSON.stringify(state.places), before, 'no panel moved')
   const inbox = state.places['@inbox']
-  const panelWidth = parseFloat(boardBlock('one').style.width)
+  // Panels are no longer one width - a goal is one column per conversation - so
+  // the column clears the tray's own paper rather than its neighbour's.
+  const inboxPanel = boardBlocks()[boardBlocks().length - 1]
+  const panelWidth = parseFloat(inboxPanel.style.width)
   const first = state.loose[0]
   const second = state.loose[1]
   assert.equal(first.x, inbox.x + panelWidth + 32, 'the tray stands in the first column clear of the inbox')
@@ -6916,11 +7025,14 @@ await checkAsync('a branch made from a card appears under it, joined by a line',
   await flush()
   const ids = cardsIn(boardBlock('dsh-vim')).map((node) => node.__attrs['data-session-id'])
   assert.deepEqual(ids, ['parent', 'child'], 'both cards are drawn, the branch under where it came from')
-  const parentCard = cardsIn(boardBlock('dsh-vim')).find((node) => node.__attrs['data-session-id'] === 'parent')
-  const childCard = cardsIn(boardBlock('dsh-vim')).find((node) => node.__attrs['data-session-id'] === 'child')
-  assert.ok(boardSeat(parentCard.parentNode, 'forkChildren'), 'the branch hangs under the parent')
-  assert.equal(boardSeat(parentCard.parentNode, 'forkChildren').children.length > 0, true)
-  assert.ok(boardSeat(childCard.parentNode, 'forkLine'), 'with a line back to it')
+  const columns = boardSeat(boardBlock('dsh-vim'), 'blockColumns')
+  assert.ok(columns, 'a goal lays its conversations out as columns')
+  assert.deepEqual(
+    columns.children.map((node) => node.__attrs['data-column']),
+    ['parent', 'child'],
+    'the branch stands in the column immediately after the one it came from'
+  )
+  assert.equal(boardSeat(cardsIn(boardBlock('dsh-vim'))[0].parentNode, 'forkChildren'), null, 'nothing hangs under a card any more')
   tap('Escape')
 })
 
@@ -7067,8 +7179,12 @@ check('a loose card is written, kept, and taken away', () => {
   // Pressing the card reopens the field on the same words.
   fireOn(shown, 'click', { type: 'click', stopPropagation() {} })
   assert.equal(boardSeat(looseCards()[0], 'cardTitleInput').value, '先记一句')
-  // The × takes it away.
-  fireOn(boardSeat(looseCards()[0], 'cardRemove'), 'click', { type: 'click', stopPropagation() {} })
+  // The × lives in the card's own menu now: one press opens it, one takes the
+  // card away.
+  fireOn(boardSeat(looseCards()[0], 'cardMenuOpen'), 'click', { type: 'click', stopPropagation() {} })
+  const cardMenu = boardSeat(looseCards()[0], 'ideaMenu')
+  assert.ok(cardMenu, 'the ⋯ opens the card\'s own menu')
+  fireOn(boardSeat(cardMenu, 'cardRemove'), 'click', { type: 'click', stopPropagation() {} })
   assert.deepEqual(fakeWindow.__dshVim.board().loose, [], 'the card is gone')
   tap('Escape')
 })
@@ -7110,10 +7226,16 @@ check('a card dropped on a conversation is tied to it and laid beside it', () =>
   const card = fakeWindow.__dshVim.board().loose[0]
   assert.equal(card.link, 'target', 'the card is tied to the conversation it was dropped on')
   assert.equal(card.done, false, 'and is still a thought rather than a delivery')
+  // A tie is no longer a line drawn across the paper: the thought is drawn in
+  // the conversation's own column, under the card it belongs to.
+  assert.equal(looseCards().length, 0, 'the card leaves the paper')
+  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  assert.equal(held.length, 1, 'and is filed under the conversation it was dropped on')
   assert.equal(
-    looseCards()[0].__attrs['title'],
+    held[0].__attrs['title'],
     expectedLabel('boardCardLinked') + 'the target',
-    'the tie is said in the card tooltip, with no dot and no line on the paper'
+    'the tie is said in the card tooltip, with no line on the paper'
   )
   resetHitTest()
   tap('Escape')
@@ -7147,16 +7269,23 @@ check('a card dropped on the 投入 band is delivered, and stays as a greyed tra
   // before the board key can mean what it means.
   fakeDocument.activeElement = body
   tap('j')
-  assert.equal(looseCards().length, 1, 'the card remains as a trace')
-  assert.equal(looseCards()[0].__attrs['data-done'], 'true', 'drawn as done')
-  assert.equal(boardSeat(looseCards()[0], 'cardDoneToggle').__attrs['aria-pressed'], 'true', 'with its done box filled in')
+  // The delivered thought is a trace now, and it lives in the column of the
+  // conversation it was handed to: no line, no note lying on the paper.
+  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const trace = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  assert.equal(trace.length, 1, 'the card remains as a trace in its column')
+  assert.equal(trace[0].__attrs['data-done'], 'true', 'drawn as done')
+  assert.equal(boardSeat(trace[0], 'cardDoneToggle').__attrs['aria-pressed'], 'true', 'with its done box filled in')
   assert.equal(
-    looseCards()[0].__attrs['title'],
+    trace[0].__attrs['title'],
     expectedLabel('boardCardLinked') + 'the target',
     'the tie is said in the tooltip, not in a line of the card'
   )
-  // The tie can be cut without losing the words.
-  fireOn(boardSeat(looseCards()[0], 'cardUnlink'), 'click', { type: 'click', stopPropagation() {} })
+  // The tie can be cut without losing the words; the card leaves the column and
+  // comes back to the paper beside it. Cutting it is the menu's job now.
+  fireOn(boardSeat(trace[0], 'cardMenuOpen'), 'click', { type: 'click', stopPropagation() {} })
+  fireOn(boardSeat(boardSeat(trace[0], 'ideaMenu'), 'cardUnlink'), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(looseCards().length, 1, 'the card is laid back on the paper')
   const after = fakeWindow.__dshVim.board().loose[0]
   assert.equal(after.link, '', 'the link is gone')
   assert.equal(after.done, false, 'and so is the delivered mark')
@@ -7249,14 +7378,18 @@ await checkAsync('the goal plus asks for a title and a body, then opens a conver
   assert.ok(title && body, 'with a title and a body to write')
   typeIn(title, '把登录改完')
   typeIn(body, '先看错误提示')
+  let pasted = null
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    pasted = { command, text }
+    return true
+  }
   clickThrough(boardSeat(sheet, 'newSessionConfirm'))
   await flush()
   assert.deepEqual(newSessions.calls, [{ workspaceId: 'w1' }], "the conversation is made in the goal's own workspace")
-  assert.equal(newSessions.prompts.length, 1, 'the body goes out as the first message')
-  assert.deepEqual(newSessions.prompts[0].content, [{ type: 'text', text: '先看错误提示' }])
-  assert.equal(newSessions.prompts[0].mode, 'queue', 'as an ordinary queued prompt')
+  assert.equal(newSessions.prompts.length, 0, "nothing is sent on the reader's behalf")
+  assert.equal(pasted && pasted.command, 'insertText', 'the words go in as a draft')
+  assert.equal(pasted && pasted.text, '先看错误提示', "the sheet's own body")
   assert.deepEqual(opened, ['fresh'], 'and the new conversation is what opens')
-  assert.equal(newSessions.prompts[0].id, 'fresh')
   const named = renames.calls.find((call) => call.id === 'fresh' && call.title === '把登录改完')
   assert.ok(named, 'the title the reader typed names the conversation')
   assert.ok(renames.calls.every((call) => call.source !== 'mainView'), 'and never as the main view: that marks it read')
@@ -7276,11 +7409,17 @@ await checkAsync('a title on its own stands a conversation up, with nothing said
   await flush()
   assert.deepEqual(newSessions.calls, [], 'an empty sheet is not a request')
   assert.ok(boardSeat(boardPanel(), 'newSessionSheet'), 'it stays up instead')
+  let pasted = null
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    pasted = { command, text }
+    return true
+  }
   typeIn(boardSeat(sheet, 'newSessionTitle'), '把登录改完')
   clickThrough(boardSeat(sheet, 'newSessionConfirm'))
   await flush()
   assert.deepEqual(newSessions.calls, [{ workspaceId: 'w1' }], "the conversation is still made in the goal's workspace")
   assert.equal(newSessions.prompts.length, 0, 'a title with no body has no message to send')
+  assert.equal(pasted, null, 'and there is nothing to put in the message box either')
   assert.deepEqual(opened, ['quiet'], 'and the new conversation is what opens')
   assert.equal(renames.calls.filter((call) => call.id === 'quiet' && call.title).length, 1, 'named once, by the title that was written')
   assert.equal(renames.calls.find((call) => call.id === 'quiet').title, '把登录改完', 'the title the reader typed names it')
@@ -7325,6 +7464,11 @@ await checkAsync('the new-conversation sheet can choose the model the conversati
   const openSheet = boardSeat(boardPanel(), 'newSessionSheet')
   typeIn(boardSeat(openSheet, 'newSessionTitle'), '把登录改完')
   typeIn(boardSeat(openSheet, 'newSessionBody'), '先看错误提示')
+  let pasted = null
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    pasted = { command, text }
+    return true
+  }
   clickThrough(boardSeat(openSheet, 'newSessionConfirm'))
   await flush()
   assert.deepEqual(
@@ -7332,13 +7476,31 @@ await checkAsync('the new-conversation sheet can choose the model the conversati
     [{ provider: 'deepseek', model: 'deepseek-reasoner' }],
     'the chosen model is submitted to the conversation that was made'
   )
-  assert.equal(newSessions.prompts.length, 1, 'and the words go out on it')
-  assert.deepEqual(newSessions.prompts[0].content, [{ type: 'text', text: '先看错误提示' }])
+  assert.equal(newSessions.prompts.length, 0, "and nothing is sent on the reader's behalf")
+  assert.equal(pasted && pasted.text, '先看错误提示', 'the body goes in as a draft')
   assert.deepEqual(opened, ['choosy'], 'the new conversation is what opens')
   assert.ok(
     renames.calls.some((call) => call.id === 'choosy' && call.title === '把登录改完'),
     'named as before, by the title that was written'
   )
+})
+
+await checkAsync('a conversation whose words could not be put in the box says so', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a'] }])
+  seed([{ id: 'a', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  newSessions.results.push('nopaste')
+  tap('j')
+  clickThrough(boardSeat(boardBlock('dsh-vim'), 'goalNewSession'))
+  const sheet = boardSeat(boardPanel(), 'newSessionSheet')
+  typeIn(boardSeat(sheet, 'newSessionTitle'), '把登录改完')
+  typeIn(boardSeat(sheet, 'newSessionBody'), '先看错误提示')
+  // A host whose editor refuses the words, and whose page has no paste event.
+  fakeDocument.execCommand = () => false
+  clickThrough(boardSeat(sheet, 'newSessionConfirm'))
+  await flush()
+  assert.deepEqual(opened, ['nopaste'], 'the conversation is still made and opened')
+  assert.equal(newSessions.prompts.length, 0, 'and nothing is sent on its behalf')
+  assert.equal(toastText(), expectedLabel('boardNewSessionPasteFailed'), 'the lost draft is said out loud')
 })
 
 await checkAsync('a card dropped on the goal plus starts a conversation from its words', async () => {
@@ -7352,16 +7514,21 @@ await checkAsync('a card dropped on the goal plus starts a conversation from its
   pressIn(firstTitle, 'Enter')
   typeIn(boardSeat(looseCards()[0], 'cardText'), '先看错误提示')
   fireOn(boardSeat(looseCards()[0], 'cardText'), 'blur', { type: 'blur' })
+  let pasted = null
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    pasted = { command, text }
+    return true
+  }
   aimAt(boardSeat(boardBlock('dsh-vim'), 'goalNewSession'))
   pressForDrag(looseCards()[0].children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
   await flush()
   assert.deepEqual(newSessions.calls, [{ workspaceId: 'w1' }], 'the same workspace the goal names')
-  assert.equal(newSessions.prompts.length, 1, 'the card is the message')
-  assert.deepEqual(
-    newSessions.prompts[0].content,
-    [{ type: 'text', text: ['把登录改完', '先看错误提示'].join(String.fromCharCode(10)) }],
+  assert.equal(newSessions.prompts.length, 0, 'the card is a draft, not a message')
+  assert.equal(
+    pasted && pasted.text,
+    ['把登录改完', '先看错误提示'].join(String.fromCharCode(10)),
     'all of the card, title and body together'
   )
   assert.deepEqual(opened, ['from-card'], 'the new conversation opens')
@@ -7425,7 +7592,11 @@ function finishedCard(text) {
   // A real press on the box starts with a pointerdown, and that press is what
   // clears the leftover 'that was a carry, not a click' flag. Firing the click
   // alone leaves the flag of the drop standing, and the box swallows it.
-  const box = boardSeat(looseCards()[0], 'cardDoneToggle')
+  // The thought lives in the conversation's own column now; its done box is
+  // there, under the card it was filed beneath.
+  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const filed = stack.children.find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  const box = boardSeat(filed, 'cardDoneToggle')
   pressForDrag(box, 5, 5)
   fire('pointerup', { type: 'pointerup' })
   fireOn(box, 'click', { type: 'click', stopPropagation() {} })
@@ -7441,7 +7612,9 @@ function boardWithFinishedCard(text) {
   // Putting it away is the reader's own gesture: a finished note is dragged onto
   // the conversation it belongs to, and lands in that conversation's own list.
   aimAt(boardSeat(boardCard('target'), 'cardEnter'))
-  pressForDrag(looseCards()[0].children[0], 10, 10)
+  const column = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const trace = column.children.find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  pressForDrag(trace.children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
   return fakeWindow.__dshVim.board().loose[0]
@@ -7477,7 +7650,11 @@ check('整理 leaves a finished card alone: the drop is what puts it away', () =
   pressForDrag(looseCards()[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
-  const box = boardSeat(looseCards()[0], 'cardDoneToggle')
+  // The drop filed the thought under the conversation, so its box is in that
+  // column now.
+  const column = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const stacked = column.children.find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  const box = boardSeat(stacked, 'cardDoneToggle')
   pressForDrag(box, 5, 5)
   fire('pointerup', { type: 'pointerup' })
   fireOn(box, 'click', { type: 'click', stopPropagation() {} })
@@ -7485,7 +7662,7 @@ check('整理 leaves a finished card alone: the drop is what puts it away', () =
   assert.equal(boardDoc().cards[0].done, true, 'and the box finished it')
   fireOn(tidyButton(), 'click', { type: 'click' })
   clock.advance(800)
-  assert.equal(looseCards().length, 1, 'the card stays on the paper')
+  assert.equal(looseCards().length, 0, 'the card stays where the drop put it')
   assert.equal(boardDoc().cards[0].filed, '', 'and nothing was filed behind the reader')
   assert.equal(boardSeat(boardCard('target'), 'cardArchive'), null, 'so no card offers a list it never got')
   tap('Escape')
@@ -7521,7 +7698,9 @@ check('the finished list is one line per note, with the two marks it needs', () 
   assert.equal(boardSeat(row, 'cardLinkLabel'), null, 'and its tie is not said twice')
   fireOn(boardSeat(row, 'donePutBack'), 'click', { type: 'click', stopPropagation() {} })
   assert.equal(boardDoc().cards[0].filed, '', 'putting it back takes it out of the list')
-  assert.equal(looseCards().length, 1, 'and it is a card on the paper again')
+  const back = boardSeat(boardBlock('dsh-vim'), 'cardStack').children
+    .find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  assert.ok(back, 'and it stands in the conversation\'s column again')
   tap('Escape')
 })
 
@@ -7574,7 +7753,9 @@ check('a card offers its finished list only once it holds something', () => {
   assert.equal(boardSeat(boardCard('target'), 'cardArchive'), null, 'an empty list is not offered')
   // The reader's own gesture hands the card over, and the offer appears.
   aimAt(boardSeat(boardCard('target'), 'cardEnter'))
-  pressForDrag(looseCards()[0].children[0], 10, 10)
+  const column = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const trace = column.children.find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  pressForDrag(trace.children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
   clock.advance(800)
@@ -7642,7 +7823,8 @@ check('a note wears the colour of the goal its conversation stands in', () => {
   pressForDrag(looseCards()[0].children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
-  const tied = looseCards()[0]
+  const tied = boardSeat(boardBlock('one'), 'cardStack').children
+    .find((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
   const dot = String(boardSeat(boardBlocks()[0], 'blockDot').style.background)
   assert.equal(hueOf(tied.style.background), hueOf(dot), 'the paper and the goal dot are one colour')
   assert.equal(hueOf(tied.style.borderLeft), hueOf(dot), 'spine and all')
@@ -8515,7 +8697,8 @@ check('a deleted idea can be taken back, and deleted again', () => {
   typeIn(boardSeat(looseCards()[0], 'cardText'), '正文')
   fireOn(boardSeat(looseCards()[0], 'cardText'), 'blur', { type: 'blur' })
   assert.equal(fakeWindow.__dshVim.board().history.canUndo, false, 'nothing to take back yet')
-  fireOn(boardSeat(looseCards()[0], 'cardRemove'), 'click', { type: 'click', stopPropagation() {} })
+  fireOn(boardSeat(looseCards()[0], 'cardMenuOpen'), 'click', { type: 'click', stopPropagation() {} })
+  fireOn(boardSeat(boardSeat(looseCards()[0], 'ideaMenu'), 'cardRemove'), 'click', { type: 'click', stopPropagation() {} })
   assert.equal(looseCards().length, 0, 'the card is gone')
   assert.equal(fakeWindow.__dshVim.board().history.canUndo, true, 'and the board remembers it')
   assert.equal(historyButton('boardUndo').__attrs['aria-disabled'], 'false', 'so the button is live')
@@ -10201,5 +10384,308 @@ await checkAsync('disposal unmounts the task window, the picker, the notice, and
   checks++
   console.log('  ok  a chosen switch key survives the migration and the archive seat steps aside')
 }
+
+// --- the history ----------------------------------------------------------
+//
+// A day's page is what the board read at that moment. These checks file one,
+// read it back, and prove the two promises the design makes: a page is a copy
+// (so a later edit cannot change it) and restoring one copies it into today
+// rather than writing to the page.
+
+// The migration checks above reload the bundle and take it down again, so the
+// plugin is not mounted when this section starts: mount it, and let `reset` own
+// the rest.
+{
+  const live = await loadBundle('?reload=history')
+  const liveCtx = makeCtx()
+  live.apply(liveCtx)
+}
+
+/** The board's own key, found by shape: the settings key is not it. */
+function boardKey() {
+  for (const key of stored.keys()) if (key.endsWith('/board/v1')) return key
+  return null
+}
+
+await checkAsync('a page is filed when the day turns over, in the words it was drawn in', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  clock.advance(24 * HOUR)
+  await flush()
+  const days = await fakeWindow.__dshVim.history()
+  assert.equal(days.length, 1, 'one page for one day of drawing')
+  const page = await fakeWindow.__dshVim.history(days[0])
+  assert.equal(page.date, days[0], 'the page is filed under its own date')
+  assert.equal(page.view.sessions.length, 1, 'the page remembers its members')
+  assert.equal(page.view.sessions[0].id, 'kept')
+  assert.equal(page.view.sessions[0].title, 'a task', 'the name is the one that was drawn')
+  assert.ok(page.doc && page.doc.blocks, 'and the arrangement travelled with it')
+  assert.ok(!('order' in page.doc), 'a page keeps five tables, not the whole document')
+  tap('Escape')
+})
+
+await checkAsync('a conversation carried in stays on the board and says how long', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  clock.advance(24 * HOUR)
+  await flush()
+  await flush()
+  const card = boardBlocks().flatMap((block) => cardsIn(block))[0]
+  assert.ok(card, 'the conversation is still on the board')
+  const carried = boardSeat(card, 'carried')
+  assert.ok(carried, 'and the card says it was carried')
+  assert.equal(
+    String(carried.textContent),
+    expectedLabel('boardHistoryCarried') + '1' + expectedLabel('boardHistoryCarriedUnit'),
+    'for one day, which is how long it has been'
+  )
+  tap('Escape')
+})
+
+await checkAsync('a page is copied into today, and the page itself is never written to', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  // A card written today belongs to the page being filed.
+  const key = boardKey()
+  const drawn = JSON.parse(stored.get(key))
+  drawn.cards.push({ id: 'c1', x: 10, y: 10, text: 'a thought', link: '', done: false, filed: '', h: 0 })
+  stored.set(key, JSON.stringify(drawn))
+  tap('Escape')
+  tap('j')
+  clock.advance(24 * HOUR)
+  await flush()
+  const days = await fakeWindow.__dshVim.history()
+  const filed = await fakeWindow.__dshVim.history(days[0])
+  assert.equal(filed.doc.cards.length, 1, 'the page carries the card that was on the board')
+  // Today starts empty: the arrangement is gone, and the card with it.
+  fakeStorage.setItem(key, JSON.stringify({ v: 2, blocks: {}, cards: [] }))
+  tap('Escape')
+  tap('j')
+  assert.equal(boardDoc().cards.length, 0, 'today has no card of its own')
+  const done = await fakeWindow.__dshVim.restoreDay(days[0])
+  await flush()
+  assert.equal(done, true, 'the page was copied in')
+  assert.equal(boardDoc().cards.length, 1, 'the copy carries the page\'s card')
+  assert.equal(boardDoc().cards[0].text, 'a thought')
+  const again = await fakeWindow.__dshVim.history(days[0])
+  assert.deepEqual(again, filed, 'and the page itself is exactly as it was')
+  tap('Escape')
+})
+
+await checkAsync('a full store keeps the change, says so, and writes it once there is room', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  const key = boardKey()
+  const before = stored.get(key)
+  fakeStorage.fail = true
+  fireOn(boardSeat(boardBlock('dsh-vim'), 'blockFold'), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(toastText(), expectedLabel('boardSaveFailed'), 'the window says the store is full')
+  assert.equal(stored.get(key), before, 'and nothing was half-written')
+  fakeStorage.fail = false
+  clock.advance(6000)
+  tap('Escape')
+  tap('j')
+  await flush()
+  const after = boardDoc()
+  assert.ok(after.blocks.w1, 'the fold is written once there is room again')
+  assert.equal(after.blocks.w1.folded, true, 'with the value the press asked for')
+  tap('Escape')
+})
+
+check('a panel forgets a conversation that is gone for good', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  const key = boardKey()
+  const doc = JSON.parse(stored.get(key))
+  doc.order.w1 = ['dead', 'kept']
+  stored.set(key, JSON.stringify(doc))
+  clock.advance(61 * 1000)
+  tap('Escape')
+  tap('j')
+  const after = JSON.parse(stored.get(key))
+  assert.deepEqual(after.order.w1, ['kept'], 'the id of a conversation that is gone is dropped')
+  tap('Escape')
+})
+
+
+await checkAsync('the history panel reads a day back, and arming it writes nothing', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
+  seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
+  tap('j')
+  clock.advance(24 * HOUR)
+  await flush()
+  const days = await fakeWindow.__dshVim.history()
+  const filed = await fakeWindow.__dshVim.history(days[0])
+
+  assert.equal(fakeWindow.__dshVim.historyPanel(true), true, 'the panel opens')
+  await flush()
+  const panel = boardSeat(boardPanel(), 'boardHistoryPanel')
+  assert.ok(panel, 'and it sits beside the canvas')
+  const row = boardSeat(panel, 'historyDay')
+  assert.ok(row, 'the day is listed')
+  assert.equal(String(row.__attrs['data-date']), days[0], 'by its own date')
+
+  fireOn(row, 'click', { type: 'click', stopPropagation() {} })
+  await flush()
+  const opened = boardSeat(boardSeat(boardPanel(), 'boardHistoryPanel'), 'historyDetail')
+  assert.ok(opened, 'opening a day shows its page')
+  const listed = []
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (child.__attrs && child.__attrs['data-role'] === 'historySession') listed.push(child)
+      walk(child)
+    }
+  }
+  walk(opened)
+  assert.equal(listed.length, 1, 'with the conversations it held')
+  assert.ok(String(listed[0].textContent).includes('a task'), 'in the words it was drawn in')
+
+  const restore = boardSeat(opened, 'historyRestore')
+  assert.ok(restore, 'and one press to copy it into today')
+  fireOn(restore, 'click', { type: 'click', stopPropagation() {} })
+  await flush()
+  const armed = boardSeat(boardSeat(boardPanel(), 'boardHistoryPanel'), 'historyRestore')
+  assert.equal(String(armed && armed.__attrs['data-armed']), 'true', 'the first press only arms it')
+  const again = await fakeWindow.__dshVim.history(days[0])
+  assert.deepEqual(again, filed, 'and the page is exactly as it was')
+
+  fakeWindow.__dshVim.historyPanel(false)
+  assert.equal(boardSeat(boardPanel(), 'boardHistoryPanel'), null, 'closing takes it away')
+  tap('Escape')
+})
+
+
+check('a drop files the conversation under the panel the event landed on', () => {
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['a'] },
+    { workspaceId: 'w2', title: 'two', path: '/work/two', sessionIds: ['b'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'a task', updatedAt: todayAt(3) },
+    { id: 'b', displayTitle: 'b task', updatedAt: todayAt(2) },
+  ])
+  tap('j')
+  // The hit test is pointed at the paper, and the event is what names the goal:
+  // a drop is delivered to the element under the pointer, so the board reads the
+  // event's own target before it asks the layout anything.
+  aimAt(fakeDocument.body)
+  dragOnto(boardBody(), 'a', { target: boardBlock('two') })
+  resetHitTest()
+  assert.deepEqual(fakeWindow.__dshVim.board().placed, { a: 'w2' }, 'the event target is the goal that took it')
+  tap('Escape')
+})
+
+check('a drag that carries more than the id still names its conversation', () => {
+  seed([{ id: 'ses_one', displayTitle: 'first task', updatedAt: todayAt(2) }])
+  tap('j')
+  dragOnto(boardBody(), '  (ses_one)  ')
+  assert.equal(toastText(), expectedLabel('pinDone'), 'the words around the id do not hide it')
+  tap('Escape')
+})
+
+check('a row that carries its name instead of its id still lands', () => {
+  seed([{ id: 'ses_two', displayTitle: 'second task', updatedAt: todayAt(2) }])
+  tap('j')
+  dragOnto(boardBody(), 'second task')
+  assert.equal(toastText(), expectedLabel('pinDone'), 'the name is the other thing a row can carry')
+  tap('Escape')
+})
+
+await checkAsync('a notice never lands below the window', async () => {
+  seedVisible()
+  MODEL.publish({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'low' }, REASONING)
+  // A box measured before the page it belonged to was replaced: its top is past
+  // the bottom of the window, which used to turn into a negative offset and put
+  // the line under the screen.
+  editor.__rect = { top: 2400, left: 300, width: 600, height: 160, right: 900, bottom: 2560 }
+  tap('q')
+  await flush()
+  const host = toastHost()
+  assert.ok(host, 'the notice is still on the page')
+  assert.equal(host.style.bottom, 'calc(100vh - 12px)', 'and it keeps its margin instead of leaving the window')
+})
+
+check('a thought filed under a conversation is one line, and the newest sits on top', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
+  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
+  tap('j')
+  const fileOne = (text) => {
+    fireOn(writeCardButton(), 'click', { type: 'click' })
+    typeIn(boardSeat(looseCards()[0], 'cardTitleInput'), text)
+    fireOn(boardSeat(looseCards()[0], 'cardTitleInput'), 'blur', { type: 'blur' })
+    aimAt(cardsIn(boardBlock('dsh-vim'))[0])
+    pressForDrag(looseCards()[0].children[0], 10, 10)
+    dragTo(300, 200)
+    resetHitTest()
+  }
+  fileOne('先写的一句')
+  fileOne('后写的一句')
+  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
+  assert.equal(held.length, 2, 'both thoughts are filed under the conversation')
+  assert.equal(held[0].__attrs['data-compact'], 'true', 'a filed thought is drawn as one line')
+  assert.equal(boardSeat(held[0], 'looseText'), null, 'with no body line spent on it')
+  assert.equal(String(boardSeat(held[0], 'looseTitle').textContent), '后写的一句', 'the newest filing sits on top')
+  // The rest of the card's verbs live behind the ⋯.
+  fireOn(boardSeat(held[0], 'cardMenuOpen'), 'click', { type: 'click', stopPropagation() {} })
+  const menu = boardSeat(held[0], 'ideaMenu')
+  assert.ok(menu, 'the ⋯ opens its own menu')
+  assert.ok(boardSeat(menu, 'ideaMenuOpen'), 'with a way to the whole note')
+  tap('Escape')
+  assert.equal(boardSeat(held[0], 'ideaMenu'), null, 'and Escape puts it away without closing the board')
+  tap('Escape')
+})
+
+check('the 投入 button pastes the thought and leaves a finished trace', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
+  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
+  tap('j')
+  fireOn(writeCardButton(), 'click', { type: 'click' })
+  typeIn(boardSeat(looseCards()[0], 'cardTitleInput'), '把这句话发过去')
+  fireOn(boardSeat(looseCards()[0], 'cardTitleInput'), 'blur', { type: 'blur' })
+  aimAt(cardsIn(boardBlock('dsh-vim'))[0])
+  pressForDrag(looseCards()[0].children[0], 10, 10)
+  dragTo(300, 200)
+  resetHitTest()
+  let pasted = null
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    pasted = { command, text }
+    return true
+  }
+  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
+  const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
+  fireOn(boardSeat(held, 'cardDeliver'), 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(pasted && pasted.command, 'insertText', 'the words are pasted as typing')
+  assert.equal(pasted && pasted.text, '把这句话发过去', "the thought's own words")
+  assert.equal(boardDoc().cards[0].done, true, 'and the card is marked delivered')
+  assert.equal(boardDoc().cards[0].link, 'target', 'still tied to where it went')
+})
+
+check('a conversation is sorted across its panel by dragging it', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['a', 'b'] }])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: todayAt(3) },
+    { id: 'b', displayTitle: 'b', updatedAt: todayAt(2) },
+  ])
+  tap('j')
+  const block = boardBlock('dsh-vim')
+  const body = boardSeat(block, 'blockBody')
+  body.__rect = { top: 100, left: 0, width: 900, height: 600, right: 900, bottom: 700 }
+  const columns = boardSeat(block, 'blockColumns').children
+  columns.forEach((column, at) => {
+    column.__rect = { top: 120, left: at * 292, width: 280, height: 300, right: at * 292 + 280, bottom: 420 }
+  })
+  assert.deepEqual(boardDoc().order.w1, ['a', 'b'], 'the panel starts in the order it was drawn in')
+  // Take the second conversation past the first one's middle, then let go.
+  pressForDrag(cardsIn(columns[1])[0], 400, 200)
+  dragTo(40, 200)
+  assert.deepEqual(boardDoc().order.w1, ['b', 'a'], 'the order the hand chose is written down')
+  tap('Escape')
+})
 
 console.log(`\nselftest: ${checks} checks passed`)
