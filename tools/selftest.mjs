@@ -8003,6 +8003,20 @@ check('a card mark opens the list already filtered to that conversation', () => 
   tap('Escape')
 })
 
+check('a conversation with no goal wears no goal colour', () => {
+  // A workspace owns no conversations today, so the one on the board is the
+  // tray's: the tray is where work has no home, and a hue would be claiming one.
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: [] }])
+  seed([{ id: 'loose', displayTitle: 'nobody filed this', updatedAt: todayAt(3) }])
+  tap('j')
+  const tray = boardBlock('收件箱')
+  assert.ok(tray, 'the conversation is drawn in the tray')
+  assert.equal(tray.style.background, 'var(--dshv-board-column, rgba(255, 255, 255, 0.05))',
+    'the tray keeps the board\'s own paper: work with no home has no place to wear')
+  assert.ok(!tray.style.borderColor, 'and draws no coloured edge')
+  tap('Escape')
+})
+
 check('two goals wear different colours even when they share a name', () => {
   registry.publish([], [
     { workspaceId: 'w1', title: 'same', path: '/work/one', sessionIds: ['a'] },
@@ -8050,6 +8064,55 @@ check('a note wears the colour of the goal its conversation stands in', () => {
   tap('Escape')
 })
 
+
+check('a goal keeps the colour it was given when its neighbours come and go', () => {
+  // Two ids on the same seat of the wheel: the paint must move one of them, and
+  // the moved one has to stay moved. `w1` and `w10` both seed on seat 6.
+  registry.publish([], [
+    { workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['a'] },
+    { workspaceId: 'w10', title: 'ten', path: '/work/ten', sessionIds: ['b'] },
+  ])
+  seed([
+    { id: 'a', displayTitle: 'a', updatedAt: todayAt(4) },
+    { id: 'b', displayTitle: 'b', updatedAt: todayAt(3) },
+  ])
+  tap('j')
+  const before = String(boardSeat(boardBlock('ten'), 'blockDot').style.background)
+  const doc = boardDoc()
+  assert.ok(doc && doc.seats && doc.seats.w1 !== undefined && doc.seats.w10 !== undefined,
+    'both seats are written down the first time the places are drawn')
+  assert.notEqual(doc.seats.w1, doc.seats.w10, 'and the last one drawn was moved off the taken seat')
+  // The neighbour goes away. A seat that lived only in the paint would hand this
+  // goal back to its own seed, which is the seat the other one had.
+  tap('Escape')
+  registry.publish([], [{ workspaceId: 'w10', title: 'ten', path: '/work/ten', sessionIds: ['b'] }])
+  tap('j')
+  assert.equal(String(boardSeat(boardBlock('ten'), 'blockDot').style.background), before,
+    'the colour the reader knows it by is the colour it still wears')
+  tap('Escape')
+})
+
+check('the dot on a goal opens the wheel, and the colour picked is the one kept', () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'one', path: '/work/one', sessionIds: ['a'] }])
+  seed([{ id: 'a', displayTitle: 'a', updatedAt: todayAt(2) }])
+  tap('j')
+  const dot = boardSeat(boardBlock('one'), 'blockDot')
+  fireOn(dot, 'click', { type: 'click' })
+  const wheel = boardSeat(boardStage(), 'seatMenu')
+  assert.ok(wheel, 'a press on the dot opens the twelve colours')
+  assert.equal(wheel.children.length, 12, 'the wheel is the whole of the choice')
+  const swatch = wheel.children.find((node) => node.__attrs && node.__attrs['data-seat'] === '7')
+  fireOn(swatch, 'click', { type: 'click' })
+  // Seat 7 is 216 degrees on the wheel, and the goal wears it everywhere.
+  const painted = String(boardSeat(boardBlock('one'), 'blockDot').style.background)
+  assert.ok(painted.indexOf('hsl(216') === 0, `the dot takes the seat picked (${painted})`)
+  assert.equal(boardDoc().seats.w1, 7, 'the choice is written into the board document')
+  assert.equal(boardSeat(boardStage(), 'seatMenu'), null, 'and the wheel puts itself away')
+  tap('Escape')
+  tap('j')
+  assert.ok(String(boardSeat(boardBlock('one'), 'blockDot').style.background).indexOf('hsl(216') === 0,
+    'a colour picked by hand outlives the paint it was picked in')
+})
 
 check('the pin key puts the conversation on screen onto the board', () => {
   seedCurrent('here')
