@@ -37,8 +37,8 @@ profile 直接 link 这里，所以这里跑的就是你看的看板。
 
 ## 门禁：pre-commit 跑全套
 
-`.githooks/pre-commit`（`git config core.hooksPath .githooks`）在提交前跑 `node --check`
-加 `node tools/selftest.mjs`，约 3 秒。`npm test` 与钩子等价，手工验证用它。
+`.githooks/pre-commit`（`git config core.hooksPath .githooks`）在提交前做产物核对、两次
+`node --check`，再跑 `node tools/selftest.mjs`，约 3 秒。`npm test` 与钩子等价，手工验证用它。
 
 - 红的基线不许提交上来。
 - 只有在检查本身待修时才可以 `--no-verify`，并在提交信息里写明原因。
