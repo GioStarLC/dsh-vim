@@ -4,56 +4,34 @@
  * listener, and exposes the debug surface the behaviour suite reads.
  */
 import React from 'react'
-import { dismissOutsidePress, forgetPointer, onContextMenu, onEscapeBlur, onFocusLoss, onKeyDown, onKeyUp, onPointerDown, onPointerMove, onUserScroll } from './keyboard.js'
-import { activateSession, showBoard, showOverview, toggleBoard } from './app-actions.js'
+import { forgetPointer, onContextMenu, onEscapeBlur, onFocusLoss, onKeyDown, onKeyUp, onPointerDown, onPointerMove, onUserScroll } from './keyboard.js'
+import { activateSession, showBoard, showOverview } from './app-actions.js'
 import { installSettings } from './settings-page.js'
 import { installBoardPage, installOverviewPage, installWindowCSS, mountOverviewInto, overviewToday } from './board-pages.js'
-import { closeVerdictMenu, closeIdeaMenu, renderBoard, closeIdeaFocus, closeGoalMenu, closeSeatMenu, closeSessionMenu, pasteIntoComposer } from './board-view.js'
+import { renderBoard, closeIdeaFocus, pasteIntoComposer } from './board-view.js'
 import { closeBoard, mountBoardInto, openBoard, unmountBoard } from './board-mount.js'
-import { commitBoardNote, noteCardFinished, openNote, pinToBoard, watchForks } from './board-notes.js'
-import { boardPointerDown, cancelBoardDrag, drawCardLinks } from './board-gestures.js'
-import { closeNewSessionSheet, paintNewSessionModel, openNewSessionSheet, startNewSessionForGoal } from './board-sheet.js'
-import { workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, slotHue } from './board-canvas.js'
-import { setHistoryRepaint, closeBoardHistory, openBoardHistory, closeSeal, dropCarried, maybeShowSeal, noteMoment, pageDoc, pageView, restoreDay, settleDay } from './board-history.js'
+import { commitBoardNote, noteCardFinished, pinToBoard, watchForks } from './board-notes.js'
+import { boardPointerDown, drawCardLinks } from './board-gestures.js'
+import { paintNewSessionModel } from './board-sheet.js'
+import { setHistoryRepaint, closeBoardHistory, openBoardHistory, dropCarried, restoreDay } from './board-history.js'
 import { wireBoardHooks } from './board-hooks.js'
-import { BOARD, boardFieldOpen, boardTitleOf } from './board-state.js'
-import { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, CARRY, JOURNAL } from './board-stores.js'
-import { dayOf, daysBetween, startOfToday } from './time.js'
-import { BOARD_INK, NOTE_PAPER, BOARD_UI, BOARD_PAGE_UI, OVERVIEW_UI, boardIcon, installBoardCSS, applyBoardPageInk } from './board-css.js'
-import { MODELPICK, closeModelPick, setSheetPick, setSheetReady, confirmLevel, confirmModelPick, markedLevel, modelPickKeyDown, openModelPick, openNewSessionModelPick, renderModelPick } from './model-picker.js'
-import { catalogGroups, isCurrentEntry, modelDirectories, levelIndex, cycleEffort, rowMarkedLevel, rowSubmitLevel, offeredModels, modelEntries, modelIndex, modelDirectoryOfCurrent, readModelList, readNewSessionModelList, levelName, switchModel } from './models.js'
-import { PALETTE, PALETTE_UI, clockDelay, setBoardOpenProbe, setSessionOpener, setPinAction, closePalette, cyclePhase, openPalette, paletteHeadline, paletteKeyDown, refreshPalette, renderPalette, stopClock, tickClocks } from './task-window.js'
-import { renameSession, archiveSession } from './session-actions.js'
-import { failureText, refusal, archiveFailureText } from './errors.js'
+import { BOARD } from './board-state.js'
+import { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, JOURNAL } from './board-stores.js'
+import { installBoardCSS } from './board-css.js'
+import { MODELPICK, closeModelPick, setSheetPick, setSheetReady, confirmLevel, markedLevel, openModelPick, renderModelPick } from './model-picker.js'
+import { catalogGroups, modelDirectories, offeredModels, modelEntries } from './models.js'
+import { PALETTE, setBoardOpenProbe, setSessionOpener, setPinAction, closePalette, cyclePhase, openPalette, paletteHeadline, refreshPalette, renderPalette, stopClock } from './task-window.js'
 import { PHASES_MODEL } from './phases.js'
-import { watchEntries, stopEntries, cancelEntry, armEntry, clearEntryArm } from './entry.js'
-import { requestTurns as requestTurnCounts, drainPeeks as drainTurnPeeks, cancelPeeks as cancelTurnCounts, turnsOf } from './turns.js'
-import { setDeliveryHook, RUNS, watchRuns, loadRunStamps, forgetRuns, runSince, elapsedText, attentionOf } from './runs.js'
-import { taskCtx, serviceOf, setTaskContext, taskServices, currentSession, currentSessionRunning, entryRunning, conversationPool, hereIndex, folderIndex, folderById, statusOf, statusIsLive } from './sessions.js'
-import { TOAST, showToast, hideToast } from './toast.js'
-import { doubleEnter, composerRoot, isComposerEditor, noteFocusRequest, clearFocusRequest, isActivating, focusComposer, composerIsEmpty, leaveEmptyComposer, inComposer, menuOpen, doubleEnterSends, sendFromComposer, handBackAfterSend, breakLine, onFocusIn, noteFocusReturn, rememberComposer } from './focus.js'
-import { state, anim, hold, pointer, pickScroller, resolveTarget, reducedMotion, stopAnim, push, stopHold, tickHold, startHold, directionOf } from './scroll.js'
-import { isEditable, isScrollable, parentOf, scrollerFrom, largestScroller, elementAt } from './dom.js'
-import { setRepaint, settings, defaults, copy, isBindableKey, normalizeKey, keyLabel, clampNumber, sanitizeFavorites, applyPatch, repairKeys, load, subscribe } from './preferences.js'
-import { EN, ZH, localeIsZh, paletteText } from './strings.js'
-import {
-  NS, STORAGE_KEY, RAW_INPUT_SELECTOR, COMPOSER_SELECTOR, MODAL_SELECTOR, ACTIVATING_SELECTOR,
-  TRIGGER_MENU_SELECTOR, FOCUS_REQUEST_MS, SEND_HAND_BACK_MS, DOUBLE_ENTER_MS, REWRITTEN_FLAG, SEND_MODES,
-  DEFAULTS, KEY_GROUPS, MODEL_SEATS, NUMERIC_SEATS, BOOL_SEATS, PLACES,
-  PENDING_LABELS, PALETTE_LIMIT, PALETTE_STEP, PALETTE_WINDOW_MS, DONE_PULSE_MS, BOARD_KEY,
-  BOARD_STORE_VERSION, NOTE_KEY, HISTORY_DB_NAME, HISTORY_DB_VERSION, HISTORY_STORE_DAYS, HISTORY_STORE_META,
-  HISTORY_BACKUP_KEY, JOURNAL_DB_NAME, JOURNAL_DB_VERSION, JOURNAL_STORE_EVENTS, SNAPSHOT_MOMENT_KEY, CARRY_KEY,
-  SNAPSHOT_VERSION, SNAPSHOT_KEEP_DEFAULT, DAY_MS, BOARD_STORE_RETRY_MS, BOARD_PRUNE_MS, HISTORY_EXPORT_KIND,
-  BOARD_CARRY_DROP_DAYS, BOARD_PANEL_ID, OVERVIEW_PANEL_ID, BOARD_INBOX, BOARD_DONE, VERDICT_KEYS,
-  BOARD_BLOCK_W, BOARD_BLOCK_H, BOARD_BLOCK_GAP_X, BOARD_BLOCK_GAP_Y, BOARD_BLOCK_PITCH_X, BOARD_BLOCK_PITCH_Y,
-  BOARD_BLOCK_COLUMNS, BOARD_ROW_COLUMNS, BOARD_CARD_W, BOARD_BLOCK_PAD, BOARD_COLUMN_GAP, BOARD_CARD_CHROME_H,
-  BOARD_CARD_LINE_H, BOARD_FLOAT_W, BOARD_GOAL_NAME_MAX, BOARD_GOAL_INTENT_MAX, BOARD_EDITOR_MIN_ROWS, BOARD_NOTE_BODY_ROWS,
-  BOARD_DONE_PREVIEW, BOARD_EDITOR_MAX_ROWS, BOARD_CANVAS_EDGE, BOARD_TIDY_GAP, BOARD_TIDY_STEP, BOARD_BLOCK_HEAD_H,
-  BOARD_TIDY_GLIDE, BOARD_MIN_FONT, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_FIT_MIN, BOARD_ZOOM_STEP,
-  BOARD_FIT_PAD, BOARD_TIDY_COLUMNS, BOARD_SLOTS, BOARD_SLOP, BOARD_SORT_EDGE, BOARD_GOAL_MENU_W,
-  ROW_CELLS, PHASES, PHASES_KEY, PEEK_SOURCE, PEEK_CONCURRENCY, PEEK_TIMEOUT_MS,
-  LIMITS, REPEAT_INTERVAL, MIN_REPEAT_INTERVAL, REPEAT_RAMP,
-} from './constants.js'
+import { watchEntries, stopEntries } from './entry.js'
+import { turnsOf } from './turns.js'
+import { setDeliveryHook, watchRuns, loadRunStamps, forgetRuns, runSince } from './runs.js'
+import { setTaskContext, taskServices, statusOf, statusIsLive } from './sessions.js'
+import { hideToast } from './toast.js'
+import { doubleEnter, composerRoot, isComposerEditor, composerIsEmpty, onFocusIn, noteFocusReturn } from './focus.js'
+import { state, pointer, pickScroller, stopAnim, stopHold } from './scroll.js'
+import { setRepaint, settings, defaults, copy, applyPatch, load } from './preferences.js'
+import { paletteText } from './strings.js'
+import { BOARD_CARRY_DROP_DAYS } from './constants.js'
 
 function makeApi() {
   return {

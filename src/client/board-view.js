@@ -6,7 +6,7 @@
  */
 import { BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_DONE, BOARD_DONE_PREVIEW, BOARD_GOAL_MENU_W, BOARD_INBOX, BOARD_PRUNE_MS, BOARD_ROW_COLUMNS, BOARD_BLOCK_HEAD_H, BOARD_SLOTS, BOARD_SLOP, BOARD_TITLE_SETTLE_MS, BOARD_UNDO_MS, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
 import { BOARD, boardFieldOpen, boardTitleOf } from './board-state.js'
-import { BOARD_HISTORY, BOARD_STORE, CARRY, HISTORY, JOURNAL, NOTE_STORE } from './board-stores.js'
+import { BOARD_HISTORY, BOARD_STORE, CARRY, NOTE_STORE } from './board-stores.js'
 import { BOARD_INK, NOTE_PAPER, BOARD_UI, boardIcon } from './board-css.js'
 import { applyBoardZoom, blockInk, blockSeat, boardBlockWidth, boardBlocks, boardCardBox, boardCardOpenBox, boardCardStacked, boardEditorRows, boardExtent, boardJoinText, boardNoteMetrics, boardPanelHeights, boardPanelWidths, boardPlaces, boardRowOf, boardSlots, goalHue, nextCardPlace, noteInkOf, notePaper, noteParts, parkCardOutside, slotHue } from './board-canvas.js'
 import { beginBoardNote, cancelBoardNote, cardVerdictOf, commitBoardNote, rememberFork, revealBoardCard } from './board-notes.js'
@@ -21,9 +21,8 @@ import { reducedMotion } from './scroll.js'
 import { conversationPool, currentSession, folderIndex, statusIsLive, statusOf, taskServices } from './sessions.js'
 import { paletteText } from './strings.js'
 import { TOAST, showToast } from './toast.js'
-import { settings } from './preferences.js'
 import { clockDelay, tickClocks } from './task-window.js'
-import { dayOf, daysBetween, startOfToday } from './time.js'
+import { dayOf } from './time.js'
 
 function renderBoard() {
   if (!BOARD.open || !BOARD.body || !BOARD.stage) return

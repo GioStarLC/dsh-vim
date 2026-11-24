@@ -5,8 +5,6 @@
  * Everything it decides is delegated to the module that owns the surface.
  */
 import { BOARD } from './board-state.js'
-import { BOARD_HISTORY, BOARD_STORE, CARRY, HISTORY, JOURNAL, NOTE_STORE } from './board-stores.js'
-import { TOAST } from './toast.js'
 import { REWRITTEN_FLAG } from './constants.js'
 import { showBoard, toggleBoard } from './app-actions.js'
 import { cancelBoardDrag } from './board-gestures.js'

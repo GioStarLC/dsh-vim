@@ -6,7 +6,7 @@
  */
 import { BOARD_PANEL_ID, OVERVIEW_PANEL_ID } from './constants.js'
 import { BOARD } from './board-state.js'
-import { closeBoard, mountBoardInto, openBoard, unmountBoard } from './board-mount.js'
+import { closeBoard, openBoard } from './board-mount.js'
 import { closeModelPick } from './model-picker.js'
 import { closePalette } from './task-window.js'
 import { armEntry, clearEntryArm } from './entry.js'

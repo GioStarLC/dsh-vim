@@ -5,16 +5,15 @@
  * back through board-hooks so this module depends on no later one.
  */
 import { CHAR_NEWLINE, BOARD_BLOCK_COLUMNS, BOARD_BLOCK_GAP_X, BOARD_BLOCK_GAP_Y, BOARD_BLOCK_H, BOARD_BLOCK_PAD, BOARD_BLOCK_PITCH_X, BOARD_BLOCK_PITCH_Y, BOARD_BLOCK_W, BOARD_BLOCK_HEAD_H, BOARD_CANVAS_EDGE, BOARD_CARD_CHROME_H, BOARD_CARD_LINE_H, BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_EDITOR_MAX_ROWS, BOARD_EDITOR_MIN_ROWS, BOARD_FIT_PAD, BOARD_INBOX, BOARD_MIN_FONT, BOARD_NOTE_BODY_ROWS, BOARD_SLOTS, BOARD_TIDY_COLUMNS, BOARD_TIDY_GAP, BOARD_TIDY_GLIDE, BOARD_TIDY_STEP, BOARD_ZOOM_FIT_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ROW_COLUMNS } from './constants.js'
-import { BOARD, boardTitleOf } from './board-state.js'
-import { BOARD_STORE, CARRY, HISTORY, NOTE_STORE } from './board-stores.js'
-import { BOARD_INK, BOARD_UI, NOTE_PAPER } from './board-css.js'
+import { BOARD } from './board-state.js'
+import { BOARD_STORE, CARRY } from './board-stores.js'
+import { BOARD_INK, NOTE_PAPER } from './board-css.js'
 import { settings } from './preferences.js'
 import { paletteText } from './strings.js'
-import { conversationPool, currentSession, folderById, folderIndex, statusIsLive, statusOf, taskServices } from './sessions.js'
-import { dayOf, daysBetween, startOfToday } from './time.js'
+import { currentSession, folderById, folderIndex, statusIsLive, statusOf, taskServices } from './sessions.js'
+import { dayOf, startOfToday } from './time.js'
 import { showToast } from './toast.js'
 import { reducedMotion } from './scroll.js'
-import { attentionOf } from './runs.js'
 import { boardCloseIdeaSheet, boardDrawLinks, boardNoteFinished, boardRepaint } from './board-hooks.js'
 
 /**
