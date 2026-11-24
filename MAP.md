@@ -2,10 +2,12 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，34 个文件，566 个顶层函数。
+源码：`src/client/`，35 个文件，566 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
+| src/client/activation.js | 58 | makeApi | } from './constants.js' |
+| src/client/activation.js | 400 | apply | } |
 | src/client/app-actions.js | 25 | activateSession | Switch the main view to one conversation. |
 | src/client/app-actions.js | 53 | toggleBoard | The board the plugin opens when a page is not available. |
 | src/client/app-actions.js | 66 | showBoard | } |
@@ -373,8 +375,6 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 89 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 435 | apply | Client activation. |
 | src/client/keyboard.js | 48 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
 | src/client/keyboard.js | 61 | onKeyDown | } |
 | src/client/keyboard.js | 471 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
