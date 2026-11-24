@@ -126,7 +126,8 @@ dsh-vim/
 │   ├── index.js        Host 面：空壳 apply
 │   └── client.js       浏览器面产物，提交进仓库，不手改
 ├── tools/
-│   ├── selftest.mjs    假 DOM + 虚拟时钟的行为断言
+│   ├── selftest.mjs    行为自测入口：按顺序加载套件
+│   ├── selftest/       harness（假 DOM/虚拟时钟/假宿主）+ 十个功能套件
 │   └── probe.patch.yml 不落盘的合成验证 overlay
 └── MAP.md              src/client 顶层函数索引：文件 + 行号（npm run map 生成）
 ```

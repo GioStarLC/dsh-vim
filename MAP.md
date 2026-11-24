@@ -392,21 +392,21 @@
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |
 | src/client/model-picker.js | 399 | renderModelPick | Repaint the picker's rows and footer from `MODELPICK.entries`. |
-| src/client/model-picker.js | 423 | markedLevel | The level one row is currently marked with. |
-| src/client/model-picker.js | 438 | confirmLevel | The level one confirm would submit. |
-| src/client/model-picker.js | 461 | buildModelRow | One row of the picker: the model's name with the `current` tag in front of |
-| src/client/model-picker.js | 516 | buildLevelCell | The levels of one model. |
-| src/client/model-picker.js | 569 | levelClickHandler | The press handler for one level chip. |
-| src/client/model-picker.js | 583 | keepModelPickVisible | Keep the selected row in sight when the list is longer than the card. |
-| src/client/model-picker.js | 605 | openModelWindow | Mount the picker, with the selection already on the model in effect. |
-| src/client/model-picker.js | 671 | closeModelPick | Unmount the picker and forget everything it was showing. |
-| src/client/model-picker.js | 707 | moveModelPick | Move the picker's selection, wrapping at both ends. |
-| src/client/model-picker.js | 735 | moveModelPickEntry | Put the selected model somewhere else in the list, and remember it there. |
-| src/client/model-picker.js | 775 | reorderFavorites | Put an ordered list of pairs back into the configured one, in the new |
-| src/client/model-picker.js | 803 | stepModelPickLevel | Step the level of the selected row, wrapping at both ends. |
-| src/client/model-picker.js | 832 | confirmModelPick | Confirm the selected row: submit its model at its marked level, then take |
-| src/client/model-picker.js | 899 | modelToast | The one-line notice after a switch, naming the level when the row has one. |
-| src/client/model-picker.js | 921 | modelPickKeyDown | Route one keystroke to the open picker. |
+| src/client/model-picker.js | 422 | markedLevel | The level one row is currently marked with. |
+| src/client/model-picker.js | 437 | confirmLevel | The level one confirm would submit. |
+| src/client/model-picker.js | 460 | buildModelRow | One row of the picker: the model's name with the `current` tag in front of |
+| src/client/model-picker.js | 515 | buildLevelCell | The levels of one model. |
+| src/client/model-picker.js | 568 | levelClickHandler | The press handler for one level chip. |
+| src/client/model-picker.js | 582 | keepModelPickVisible | Keep the selected row in sight when the list is longer than the card. |
+| src/client/model-picker.js | 604 | openModelWindow | Mount the picker, with the selection already on the model in effect. |
+| src/client/model-picker.js | 670 | closeModelPick | Unmount the picker and forget everything it was showing. |
+| src/client/model-picker.js | 706 | moveModelPick | Move the picker's selection, wrapping at both ends. |
+| src/client/model-picker.js | 734 | moveModelPickEntry | Put the selected model somewhere else in the list, and remember it there. |
+| src/client/model-picker.js | 774 | reorderFavorites | Put an ordered list of pairs back into the configured one, in the new |
+| src/client/model-picker.js | 802 | stepModelPickLevel | Step the level of the selected row, wrapping at both ends. |
+| src/client/model-picker.js | 831 | confirmModelPick | Confirm the selected row: submit its model at its marked level, then take |
+| src/client/model-picker.js | 898 | modelToast | The one-line notice after a switch, naming the level when the row has one. |
+| src/client/model-picker.js | 920 | modelPickKeyDown | Route one keystroke to the open picker. |
 | src/client/models.js | 7 | isCurrentEntry | Whether one catalog row is the model currently in effect. |
 | src/client/models.js | 31 | modelDirectories | The host's session model-selection service, when it publishes one. |
 | src/client/models.js | 47 | effortLevels | The reasoning levels one model offers, in the order the composer's own |

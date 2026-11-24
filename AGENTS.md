@@ -37,8 +37,9 @@ profile 直接 link 这里，所以这里跑的就是你看的看板。
   `board-canvas / board-view / board-gestures / board-mount` → `keyboard / app-actions` →
   `activation`。需要反向调用时走 `board-hooks` 或各模块的 `setXxx` 注入，不新增循环 import。
 
-`tools/selftest.mjs` 同理：先 `grep -n "await check(" tools/selftest.mjs` 定位那条用例，
-再读它附近，不要整份读。
+`tools/selftest/` 同理：先 `grep -rn "那条用例的标签" tools/selftest/` 找到套件与行号，再读
+它附近。`harness.mjs` 是假 DOM、虚拟时钟与加载器；`helpers.mjs` 是套件共用的播种与读取；
+`tools/selftest.mjs` 只负责按顺序加载套件并跑注册队列。
 
 ## 门禁：pre-commit 跑全套
 
