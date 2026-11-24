@@ -26,11 +26,16 @@ profile 直接 link 这里，所以这里跑的就是你看的看板。
 
 ## 导航：先查 MAP，再读代码
 
-源码在 `src/client/`，按职责分文件。找入口的方式只有一种：
+源码在 `src/client/`，按职责分成 35 个文件。`index.js` 只有入口的三行导出，装配在
+`activation.js`。找入口的方式只有一种：
 
 - `MAP.md` —— 每个顶层函数一行，带文件、行号和上方注释首句。**按名字查到文件与行号，
   再读那一段**，不要从头读。
 - `npm run map` —— 改完代码重新生成；`MAP.md` 不手改。
+- 依赖方向是 DAG：底层 `constants / strings / dom` → `preferences / scroll / sessions /
+  runs / turns / phases` → `focus / toast` → `task-window / model-picker / entry` →
+  `board-canvas / board-view / board-gestures / board-mount` → `keyboard / app-actions` →
+  `activation`。需要反向调用时走 `board-hooks` 或各模块的 `setXxx` 注入，不新增循环 import。
 
 `tools/selftest.mjs` 同理：先 `grep -n "await check(" tools/selftest.mjs` 定位那条用例，
 再读它附近，不要整份读。

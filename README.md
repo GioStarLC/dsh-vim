@@ -112,8 +112,15 @@ dsh-vim/
 ├── package.json        dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml    insert 一行 dsh-vim，让 Loader 挂载本插件
 ├── dsh.plugin.json     插件管理器展示用的清单
-├── src/client/         浏览器面源码：按职责分文件
-│   └── index.js        入口：插件名、inject、apply
+├── src/client/         浏览器面源码，按职责分文件（35 个）
+│   ├── index.js        入口：插件名、inject、apply（37 行）
+│   ├── activation.js   装配：hooks、监听器、设置页与两个侧栏页的安装
+│   ├── keyboard.js     键盘仲裁与指针/滚动/焦点监听
+│   ├── task-window.js  任务窗（f）          model-picker.js  模型窗（w）
+│   ├── board-*.js      看板：状态/存储/画布/视图/手势/挂载/历史/页面
+│   ├── sessions.js     宿主会话读取层        preferences.js   偏好存储
+│   ├── focus.js        输入框焦点与发送       scroll.js        滚动引擎
+│   └── …               strings / constants / dom / time / toast / turns / runs / …
 ├── scripts/build.mjs   src/client/ → lib/client.js（rollup）
 ├── lib/
 │   ├── index.js        Host 面：空壳 apply
@@ -121,7 +128,7 @@ dsh-vim/
 ├── tools/
 │   ├── selftest.mjs    假 DOM + 虚拟时钟的行为断言
 │   └── probe.patch.yml 不落盘的合成验证 overlay
-└── MAP.md              client.js 顶层函数索引（npm run map 生成）
+└── MAP.md              src/client 顶层函数索引：文件 + 行号（npm run map 生成）
 ```
 
 `lib/client.js` 是**构建产物**：改 `src/client/`，跑 `npm run build`，产物与源码同一条提交。产物仍满足 loader 的单文件契约（一个 `window.__ModuleLoader__.load({ id, factory })`），唯一 `require()` 是 `react`。设置页用 `createElement` 手写，任务窗是纯 DOM + 内联样式，运行时零依赖。
