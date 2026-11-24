@@ -1,25 +1,15 @@
-/**
- * Behaviour checks: the day pages and the history panel.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
-import { seed, HOUR, ago, toastText, toastHost, seedVisible, todayAt, boardPanel, boardBody, boardBlocks, boardBlock, cardsIn, looseCards, boardDoc, boardSeat, pressForDrag, dragTo, tapMark, ideaFocusSheet, ideaFocusField, ideaFocusOpen, writeIdea, dragOnto, boardCard, boardKey, drawnColumns, journalLines } from './helpers.mjs'
-// --- the history ----------------------------------------------------------
-//
-// A day's page is what the board read at that moment. These checks file one,
-// read it back, and prove the two promises the design makes: a page is a copy
-// (so a later edit cannot change it) and restoring one copies it into today
-// rather than writing to the page.
+import { now, clock, composer, button, body, editor, fireOn, flush, press, stored, fakeStorage, fakeWindow, menu, fakeDocument, aimAt, resetHitTest, registry, renames, MODEL, REASONING, opened, makeCtx, loadBundle, tap, expectedLabel, check, checkAsync, step, setNow } from './harness.mjs'
+import { seed, HOUR, ago, toastText, toastHost, seedVisible, todayAt, boardPanel, boardBody, boardStage, boardBlocks, boardBlock, cardsIn, looseCards, boardDoc, recordTyping, boardSeat, pressForDrag, dragTo, tapMark, ideaFocusSheet, ideaFocusField, ideaFocusOpen, writeIdea, dragOnto, openBoardCard, boardCard, boardKey, drawnColumns } from './helpers.mjs'
 
-// The migration checks above reload the bundle and take it down again, so the
-// plugin is not mounted when this section starts: mount it, and let `reset` own
-// the rest.
 step(async () => {
+// the rest.
+{
   const live = await loadBundle('?reload=history')
   const liveCtx = makeCtx()
   live.apply(liveCtx)
+}
 })
-
 
 checkAsync('a page is filed when the day turns over, in the words it was drawn in', async () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
@@ -220,8 +210,7 @@ check('a panel forgets a conversation that is gone for good', () => {
   tap('Escape')
 })
 
-
-checkAsync('the history panel reads a day back, and arming it writes nothing', async () => {
+checkAsync('the history is a calendar, and a day steps the canvas onto its page', async () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['kept'] }])
   seed([{ id: 'kept', displayTitle: 'a task', updatedAt: todayAt(2) }])
   tap('j')
@@ -229,44 +218,110 @@ checkAsync('the history panel reads a day back, and arming it writes nothing', a
   await flush()
   const days = await fakeWindow.__dshVim.history()
   const filed = await fakeWindow.__dshVim.history(days[0])
+  const boardBefore = stored.get(boardKey())
 
-  assert.equal(fakeWindow.__dshVim.historyPanel(true), true, 'the panel opens')
+  assert.equal(fakeWindow.__dshVim.historyPanel(true), true, 'the history opens')
   await flush()
   const panel = boardSeat(boardPanel(), 'boardHistoryPanel')
   assert.ok(panel, 'and it sits beside the canvas')
-  const row = boardSeat(panel, 'historyDay')
-  assert.ok(row, 'the day is listed')
-  assert.equal(String(row.__attrs['data-date']), days[0], 'by its own date')
-
-  fireOn(row, 'click', { type: 'click', stopPropagation() {} })
-  await flush()
-  const opened = boardSeat(boardSeat(boardPanel(), 'boardHistoryPanel'), 'historyDetail')
-  assert.ok(opened, 'opening a day shows its page')
-  const listed = []
-  const walk = (node) => {
-    for (const child of node.children || []) {
-      if (child.__attrs && child.__attrs['data-role'] === 'historySession') listed.push(child)
-      walk(child)
+  const calendarOf = () => boardSeat(boardPanel(), 'historyCalendar')
+  assert.ok(calendarOf(), 'as a calendar rather than a list')
+  const collect = () => {
+    const out = []
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        if (child.__attrs && child.__attrs['data-role'] === 'historyDay') out.push(child)
+        walk(child)
+      }
     }
+    walk(calendarOf())
+    return out
   }
-  walk(opened)
-  assert.equal(listed.length, 1, 'with the conversations it held')
-  assert.ok(String(listed[0].textContent).includes('a task'), 'in the words it was drawn in')
+  // The calendar opens on this month. A run that crossed midnight into a new
+  // month filed yesterday under the month before it, and that month is one
+  // press of < away - the press a reader makes, not a fact about the panel.
+  let cells = collect()
+  for (let back = 0; back < 12 && !cells.some((cell) => cell.__attrs['data-date'] === days[0]); back++) {
+    const prev = boardSeat(calendarOf(), 'historyPrevMonth')
+    if (!prev || prev.__attrs['data-off'] === 'true') break
+    fireOn(prev, 'click', { type: 'click', stopPropagation() {} })
+    await flush()
+    cells = collect()
+  }
+  const dotted = cells.filter((cell) => cell.__attrs['data-history'] === 'true')
+  assert.deepEqual(dotted.map((cell) => cell.__attrs['data-date']), [days[0]],
+    'the one day with a page wears the dot under it')
+  const plain = cells.find((cell) => cell.__attrs['data-history'] !== 'true' && cell.__attrs['data-today'] !== 'true')
+  assert.ok(plain, 'a day with nothing under it is still drawn')
+  assert.ok(!plain.__attrs['role'], 'but it is not a press')
+  assert.ok(boardSeat(calendarOf(), 'historyMonth'), 'under the month it stands in')
 
-  const restore = boardSeat(opened, 'historyRestore')
-  assert.ok(restore, 'and one press to copy it into today')
+  fireOn(dotted[0], 'click', { type: 'click', stopPropagation() {} })
+  await flush()
+  await flush()
+  const page = boardBlocks()[0]
+  assert.ok(page, 'the canvas draws the page\'s goals where they stood')
+  assert.equal(page.__attrs['data-history'], 'true', 'as a page, not as today')
+  assert.ok(!page.__attrs['data-handle'], 'with nothing on it to drag')
+  const seat = boardSeat(page, 'historySession')
+  assert.ok(seat, 'and the conversations it held')
+  assert.ok(String(seat.textContent).includes('a task'), 'in the words they were drawn in')
+  const banner = boardSeat(boardPanel(), 'historyBanner')
+  assert.ok(banner, 'a bar says which day this is')
+  assert.equal(String(boardSeat(banner, 'historyBannerDate').textContent), days[0])
+  assert.ok(boardSeat(banner, 'historyReadOnly'), 'that it is read rather than worked on')
+  assert.ok(boardSeat(banner, 'historyBackToday'), 'and offers the way back')
+  assert.equal(String(boardSeat(boardPanel(), 'addCard').style.display), 'none',
+    'the heading\'s working chips are put away')
+
+  // Nothing on a page writes: not the double press that writes a thought, and
+  // not the day itself when it is only being read.
+  fireOn(boardStage(), 'dblclick', {
+    type: 'dblclick',
+    target: boardStage(),
+    clientX: 12,
+    clientY: 12,
+    stopPropagation() {},
+  })
+  await flush()
+  assert.equal(stored.get(boardKey()), boardBefore, 'a page cannot be written through')
+
+  const restore = boardSeat(boardPanel(), 'historyRestore')
+  assert.ok(restore, 'and one press copies it into today')
   fireOn(restore, 'click', { type: 'click', stopPropagation() {} })
   await flush()
-  const armed = boardSeat(boardSeat(boardPanel(), 'boardHistoryPanel'), 'historyRestore')
+  const armed = boardSeat(boardPanel(), 'historyRestore')
   assert.equal(String(armed && armed.__attrs['data-armed']), 'true', 'the first press only arms it')
   const again = await fakeWindow.__dshVim.history(days[0])
   assert.deepEqual(again, filed, 'and the page is exactly as it was')
+  assert.equal(stored.get(boardKey()), boardBefore, 'with today untouched too')
+
+  tap('Escape')
+  await flush()
+  assert.equal(boardSeat(boardPanel(), 'historyBanner'), null, 'Escape steps out of the page')
+  assert.ok(boardBlocks()[0].__attrs['data-handle'], 'and today\'s canvas is back')
+
+  // Restoring is the one write a page offers, and it takes two presses: the
+  // first arms it, the second copies the day into today and leaves the page.
+  assert.equal(fakeWindow.__dshVim.historyView(days[0]), true, 'the page can be stepped onto again')
+  await flush()
+  await flush()
+  fireOn(boardSeat(boardPanel(), 'historyRestore'), 'click', { type: 'click', stopPropagation() {} })
+  await flush()
+  fireOn(boardSeat(boardPanel(), 'historyRestore'), 'click', { type: 'click', stopPropagation() {} })
+  await flush()
+  await flush()
+  assert.equal(boardSeat(boardPanel(), 'historyBanner'), null, 'the second press copies it and leaves the page')
+  assert.equal(
+    toastText(),
+    expectedLabel('boardHistoryRestored') + days[0] + expectedLabel('boardHistoryRestoredTail'),
+    'and says which day today now stands on',
+  )
 
   fakeWindow.__dshVim.historyPanel(false)
-  assert.equal(boardSeat(boardPanel(), 'boardHistoryPanel'), null, 'closing takes it away')
+  assert.equal(boardSeat(boardPanel(), 'boardHistoryPanel'), null, 'closing the calendar takes it away')
   tap('Escape')
 })
-
 
 check('a drop files the conversation under the panel the event landed on', () => {
   registry.publish([], [
@@ -336,6 +391,20 @@ check('a thought filed under a conversation is one line, and the newest sits on 
   assert.equal(held.length, 2, 'both thoughts are filed under the conversation')
   assert.equal(held[0].__attrs['data-compact'], 'true', 'a filed thought is drawn as one line')
   assert.equal(Boolean(boardSeat(held[0], 'looseText')), false, 'with no body line spent on it')
+  // Filed is a state, not a style of its own: a thought under a conversation is
+  // read the way the inbox reads one - same corner, same height, same padding.
+  assert.equal(held[0].style.borderRadius, '8px', 'the row wears the inbox row\'s corner')
+  assert.equal(held[0].style.minHeight, '30px', 'and its height')
+  assert.equal(held[0].style.padding, '4px 6px 4px 10px', 'and its padding')
+  // What it keeps is what the card was: its verbs, and the hue of its goal.
+  assert.ok(boardSeat(held[0], 'cardDeliver'), 'the hand-over mark is still on the row')
+  assert.ok(boardSeat(held[0], 'cardMenuOpen'), 'and so is the menu mark')
+  const dot = String(boardSeat(boardBlock('dsh-vim'), 'blockDot').style.background)
+  const hueOf = (colour) => {
+    const found = /hsl\((\d+)/.exec(String(colour))
+    return found ? found[1] : ''
+  }
+  assert.equal(hueOf(held[0].style.background), hueOf(dot), 'and the goal\'s own colour')
   assert.equal(String(boardSeat(held[0], 'looseTitle').textContent), '后写的一句', 'the newest filing sits on top')
   // The rest of the card's verbs live behind the ⋯. The two filings above left
   // the hand mid-carry, and a click straight after a drag is that drag's
@@ -366,20 +435,122 @@ check('the 投入 button pastes the thought and leaves a finished trace', () => 
   pressForDrag(looseCards()[0].children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
-  let pasted = null
-  fakeDocument.execCommand = (command, _showUI, text) => {
-    pasted = { command, text }
-    return true
-  }
+  const typed = recordTyping()
   const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
   const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
   // The drop just above left the hand mid-carry, so the mark is pressed before
   // it is clicked: a click straight after a drag belongs to that drag.
   tapMark(boardSeat(held, 'cardDeliver'))
-  assert.equal(pasted && pasted.command, 'insertText', 'the words are pasted as typing')
-  assert.equal(pasted && pasted.text, '把这句话发过去', "the thought's own words")
-  assert.equal(boardDoc().cards[0].done, true, 'and the card is marked delivered')
+  assert.equal(typed.commands.length, 0, 'the words wait for the box rather than opening the conversation')
+  assert.equal(boardDoc().cards[0].done, true, 'the card is marked delivered')
   assert.equal(boardDoc().cards[0].link, 'target', 'still tied to where it went')
+  openBoardCard('target')
+  assert.equal(typed.commands[0], 'insertText', 'the words are pasted as typing once the box exists')
+  assert.equal(typed.text(), '把这句话发过去', "the thought's own words")
+})
+
+checkAsync('two cards dropped on one conversation land together, in the order they were let go', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
+  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
+  tap('j')
+  const typed = recordTyping()
+  const handOver = (text) => {
+    writeIdea(text)
+    aimAt(boardSeat(cardsIn(boardBlock('dsh-vim'))[0], 'cardEnter'))
+    pressForDrag(looseCards()[0].children[0], 10, 10)
+    dragTo(300, 200)
+    resetHitTest()
+  }
+  handOver('第一张')
+  handOver('第二张')
+  // Two drops, no door: the board is still up and the conversation was never
+  // opened, which is the whole point of the queue.
+  assert.equal(fakeWindow.__dshVim.board().open, true, 'both drops stay on the board')
+  assert.deepEqual(opened, [], 'and neither opens the conversation')
+  openBoardCard('target')
+  await flush()
+  assert.equal(
+    typed.text(),
+    ['第一张', '第二张'].join(String.fromCharCode(10, 10)),
+    'the queue lands in the order the cards were let go, one block apart'
+  )
+  assert.deepEqual(
+    typed.commands,
+    ['insertText', 'insertParagraph', 'insertParagraph', 'insertText'],
+    'and the block between the two cards is typed as paragraph breaks, not carried inside a text run'
+  )
+  assert.equal(renames.calls.length, 1, 'the conversation is named once, not twice')
+  assert.equal(renames.calls[0].title, '第二张', 'by the newest card, as a second press would')
+})
+
+checkAsync('two cards arrive as two paragraphs, through the editor\'s own paste', async () => {
+  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
+  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
+  tap('j')
+  const typed = recordTyping()
+  const handOver = (text) => {
+    writeIdea(text)
+    aimAt(boardSeat(cardsIn(boardBlock('dsh-vim'))[0], 'cardEnter'))
+    pressForDrag(looseCards()[0].children[0], 10, 10)
+    dragTo(300, 200)
+    resetHitTest()
+  }
+  handOver('第一张')
+  handOver('第二张')
+
+  // The host is a rich editor: it owns its document, so the editing commands can
+  // type text but cannot press its Enter. A paste, on the other hand, is the
+  // editor's own way in - it reads the blocks the paste carries as paragraphs.
+  // This page is given that same capability, which is what lets the check say
+  // which of the two paths the plugin took.
+  const pastes = []
+  const realDispatch = editor.dispatchEvent
+  globalThis.DataTransfer = class {
+    constructor() { this.data = new Map() }
+    setData(kind, value) { this.data.set(kind, String(value)) }
+    getData(kind) { return this.data.get(kind) || '' }
+  }
+  globalThis.ClipboardEvent = class {
+    constructor(type, init) {
+      this.type = type
+      this.clipboardData = init && init.clipboardData
+      this.bubbles = !!(init && init.bubbles)
+      this.cancelable = !!(init && init.cancelable)
+      this.defaultPrevented = false
+    }
+    preventDefault() { this.defaultPrevented = true }
+  }
+  editor.dispatchEvent = (ev) => {
+    if (!ev || ev.type !== 'paste') return realDispatch ? realDispatch(ev) : true
+    pastes.push(ev)
+    // What the editor does with a paste: the plain reading arrives, in place.
+    editor.value = String(editor.value || '') + ev.clipboardData.getData('text/plain')
+    return true
+  }
+  try {
+    openBoardCard('target')
+    // The plugin reads the box back on its own timer, because a rich editor
+    // commits on its own beat: the page's clock is stepped once to reach it.
+    clock.advance(1)
+    await flush()
+    assert.equal(pastes.length, 1, 'the queue lands as one paste, not as a run of typing')
+    assert.equal(typed.commands.length, 0, 'and nothing is typed into the box at all')
+    assert.equal(editor.value, ['第一张', '第二张'].join(String.fromCharCode(10, 10)),
+      'the two cards a blank line apart')
+    const html = pastes[0].clipboardData.getData('text/html')
+    assert.ok(html.includes('<p>第一张</p>'), 'the first card carried as a paragraph')
+    assert.ok(html.includes('<p></p>'), 'the blank line carried as an empty paragraph')
+    assert.ok(html.includes('<p>第二张</p>'), 'and the second card as its own')
+  } finally {
+    delete globalThis.ClipboardEvent
+    delete globalThis.DataTransfer
+    editor.dispatchEvent = realDispatch
+    // The fake box keeps what the paste put in it, and the next check's hand-over
+    // would read it as the reader's own draft: the page is left as it was found.
+    editor.value = ''
+    composer.value = ''
+  }
+  tap('Escape')
 })
 
 check('a conversation is sorted across its panel by dragging it', () => {
@@ -408,7 +579,6 @@ check('a conversation is sorted across its panel by dragging it', () => {
   assert.deepEqual(boardDoc().order.w1, ['b', 'a'], 'the order the hand chose is written down')
   tap('Escape')
 })
-
 
 check('the panel keeps its own order, however recently a card moved', () => {
   // Mid-afternoon, so "three hours ago" is earlier today whatever the hour the
@@ -558,7 +728,7 @@ check('an opened thought holds the whole of what it says', () => {
   assert.equal(ideaFocusOpen(), false, 'and Escape puts the sheet away')
 })
 
-check('a locked title survives a hand-over and refuses a rename', () => {
+checkAsync('a locked title survives a hand-over and refuses a rename', async () => {
   registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
   seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
   tap('j')
@@ -569,18 +739,21 @@ check('a locked title survives a hand-over and refuses a rename', () => {
   pressForDrag(looseCards()[0].children[0], 10, 10)
   dragTo(300, 200)
   resetHitTest()
-  let pasted = null
-  fakeDocument.execCommand = (command, _showUI, text) => {
-    pasted = { command, text }
-    return true
-  }
+  const typed = recordTyping()
   const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
   const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
   tapMark(boardSeat(held, 'cardDeliver'))
-  assert.equal(pasted && pasted.text, '修个 bug', 'the words still land in the box')
+  assert.equal(typed.commands.length, 0, 'the words wait for the box')
+  openBoardCard('target')
+  await flush()
+  assert.equal(typed.text(), '修个 bug', 'the words still land in the box')
   assert.equal(renames.calls.length, 0, 'but a locked title is never renamed')
-  // Handing the words over opens the conversation, which puts the board away:
-  // the press that refuses a rename has to come back to the card it is about.
+  // Opening the conversation put the board away and the host does not focus
+  // the box on the way in; the reader's keyboard is still the page's.
+  fakeDocument.activeElement = body
+  // The board is gone, so the press that refuses a rename comes back to the
+  // card it is about., so the press that refuses a
+  // rename comes back to the card it is about.
   tap('j')
   const menuMark = boardSeat(boardCard('target'), 'cardMenuOpen')
   assert.ok(menuMark, 'the locked card still carries its menu mark')
@@ -609,136 +782,3 @@ check('escape puts the card menu away and leaves the board up', () => {
   )
   tap('Escape')
 })
-
-check('finished thoughts are counted after three, and unfold on a press', () => {
-  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
-  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
-  tap('j')
-  const fileDone = (text) => {
-    writeIdea(text)
-    aimAt(cardsIn(boardBlock('dsh-vim'))[0])
-    pressForDrag(looseCards()[0].children[0], 10, 10)
-    dragTo(300, 200)
-    resetHitTest()
-    const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
-    const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
-    tapMark(boardSeat(held, 'cardDoneToggle'))
-  }
-  for (let at = 1; at <= 5; at++) fileDone('完成 ' + at)
-  const stackNow = () => boardSeat(boardBlock('dsh-vim'), 'cardStack')
-  const drawn = () => stackNow().children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')
-  assert.equal(drawn().length, 3, 'only three finished thoughts are drawn')
-  const more = boardSeat(stackNow(), 'cardDoneMore')
-  assert.ok(more, 'with a count for the rest')
-  assert.equal(String(more.textContent), expectedLabel('boardDoneMore') + ' 2 ' + expectedLabel('boardDoneMoreUnit'))
-  tapMark(more)
-  assert.equal(drawn().length, 5, 'one press shows them all')
-  tapMark(boardSeat(stackNow(), 'cardDoneMore'))
-  assert.equal(drawn().length, 3, 'and the same press folds them again')
-  tap('Escape')
-})
-
-check('a thought handed into a box already holding words starts a new paragraph', () => {
-  registry.publish([], [{ workspaceId: 'w1', title: 'dsh-vim', path: '/work/dsh-vim', sessionIds: ['target'] }])
-  seed([{ id: 'target', displayTitle: 'the target', updatedAt: todayAt(2) }])
-  tap('j')
-  writeIdea('第二段')
-  aimAt(cardsIn(boardBlock('dsh-vim'))[0])
-  pressForDrag(looseCards()[0].children[0], 10, 10)
-  dragTo(300, 200)
-  resetHitTest()
-  let pasted = null
-  fakeDocument.execCommand = (command, _showUI, text) => {
-    pasted = { command, text }
-    return true
-  }
-  const stack = boardSeat(boardBlock('dsh-vim'), 'cardStack')
-  const held = stack.children.filter((node) => node.__attrs && node.__attrs['data-role'] === 'looseCard')[0]
-  tapMark(boardSeat(held, 'cardDeliver'))
-  // The fake host's box is always empty, so the blank line this path adds when a
-  // reader has already written something cannot be observed here; the words
-  // landing is what this check can see, and the break is one branch beside it.
-  assert.equal(pasted && pasted.command, 'insertText', 'the words land in the box')
-  assert.equal(String(pasted && pasted.text).slice(-3), '第二段', 'and they are the card\'s own')
-})
-
-
-check('a thought keeps the moment it was written, and the moment it was dealt with', () => {
-  registry.publish([], [])
-  seed([])
-  tap('j')
-  writeIdea('先想清楚再动手')
-  const written = boardDoc().cards[0]
-  assert.ok(written.w > 0, 'the card remembers when it was written')
-  assert.equal(written.d, 0, 'and has no done moment yet')
-  fireOn(boardSeat(looseCards()[0], 'cardDoneToggle'), 'click', { type: 'click', stopPropagation() {} })
-  const after = boardDoc().cards[0]
-  assert.ok(after.d > 0, 'dealing with it stamps the second clock')
-  assert.equal(after.w, written.w, 'and leaves the first one alone')
-  fireOn(boardSeat(looseCards()[0], 'cardDoneToggle'), 'click', { type: 'click', stopPropagation() {} })
-  assert.equal(boardDoc().cards[0].d, 0, 'taking the mark back takes the moment with it')
-  tap('Escape')
-})
-
-checkAsync('the morning after, the day that ended is read back once', async () => {
-  registry.publish([], [])
-  seed([])
-  tap('j')
-  writeIdea('给重试加个幂等键')
-  await flush()
-  // Read by its words rather than by its count: the journal is a database and
-  // its writes land a microtask later, so lines other checks queued can still
-  // be draining into it when this one starts.
-  const written = journalLines().filter((line) => line.kind === 'note/written'
-    && line.text === '给重试加个幂等键')
-  assert.equal(written.length, 1, 'writing a thought leaves one line, carrying its words')
-
-  tap('Escape')
-  clock.jump(24 * HOUR)
-  await flush()
-  tap('j')
-  await flush()
-  const seal = boardSeat(boardPanel(), 'boardSeal')
-  assert.ok(seal, 'the day that ended is shown when the board comes back')
-  assert.ok(String(boardSeat(seal, 'sealDate').textContent).length > 4, 'under its own date')
-  assert.ok(String(boardSeat(seal, 'sealLine').textContent).includes(expectedLabel('boardSealWritten')),
-    'counting the thoughts it recorded')
-  assert.ok(String(boardSeat(seal, 'sealLeft').textContent).includes(expectedLabel('boardSealWaiting')),
-    'and saying what the desk still owes')
-  tap('Enter')
-  assert.equal(boardSeat(boardPanel(), 'boardSeal'), null, 'and one key puts it away')
-  tap('Escape')
-  tap('j')
-  await flush()
-  assert.equal(boardSeat(boardPanel(), 'boardSeal'), null, 'it is not shown a second time')
-  tap('Escape')
-})
-
-checkAsync('a sentence can be found across the pages', async () => {
-  registry.publish([], [])
-  seed([])
-  tap('j')
-  writeIdea('灰度先放百分之一')
-  await flush()
-  tap('Escape')
-  clock.jump(24 * HOUR)
-  await flush()
-  tap('j')
-  await flush()
-  if (boardSeat(boardPanel(), 'boardSeal')) tap('Enter')
-  assert.equal(fakeWindow.__dshVim.historyPanel(true), true, 'the history opens')
-  await flush()
-  const field = boardSeat(boardPanel(), 'historySearch')
-  assert.ok(field, 'with a line to search in')
-  field.value = '灰度'
-  fireOn(field, 'input', { type: 'input' })
-  for (let round = 0; round < 6; round++) await flush()
-  const hit = boardSeat(boardPanel(), 'historyHit')
-  assert.ok(hit, 'the page it was written on comes back')
-  assert.ok(String(hit.textContent || '').includes('灰度'), 'with the words it was found by')
-  fakeWindow.__dshVim.historyPanel(false)
-  tap('Escape')
-})
-
-
-

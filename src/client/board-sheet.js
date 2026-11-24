@@ -4,7 +4,7 @@
  * back through board-hooks; the picker is the page's own window.
  */
 import { BOARD } from './board-state.js'
-import { BOARD_STORE, JOURNAL } from './board-stores.js'
+import { BOARD_STORE, HANDOFF_STORE, JOURNAL } from './board-stores.js'
 import { BOARD_INK, BOARD_UI } from './board-css.js'
 import { boardBlockByKey, noteParts, workspaceForGoal } from './board-canvas.js'
 import { boardOpenSession, boardPasteDraft, boardRepaint } from './board-hooks.js'
@@ -394,6 +394,12 @@ function applyNewSessionModel(sessionId, pick) {
  * own. Two sources feed this: the sheet's title and body, and a card
  * dropped on the plus — the latter leaves the card behind as the receipt,
  * exactly as handing it to an existing conversation does.
+ *
+ * Nothing is opened: the board is where the gesture was made, and a request
+ * for a conversation is not a request to go and read it. The words become
+ * that conversation's waiting draft, drained by the same hand-over queue an
+ * existing conversation uses, so the first time it is opened its box holds
+ * them.
  * @param {string} goalKey - the goal the conversation is filed under.
  * @param {string} title - the name the conversation should wear.
  * @param {string} text - the words to hand over as a draft; empty hands over none.
@@ -446,40 +452,33 @@ function startNewSessionForGoal(goalKey, title, text, cardId) {
     sessionId = String(created || '')
     if (!sessionId) throw new Error(paletteText('boardNewSessionUnavailable'))
     // The card is where the reader pointed, not where the workspace would
-    // have put it: file it before opening so the next board agrees.
+    // have put it: file the conversation there so the next board agrees.
     BOARD_STORE.placeSession(sessionId, goalKey)
-    boardOpenSession(sessionId)
     JOURNAL.add('thread/born', { session: sessionId, goal: goalKey })
-    // The Session exists and is open: a second request from here is a
-    // second conversation on purpose, not a double press on one button.
-    // The paste below can wait on the message box, and that wait must not
-    // keep the board's plus answering "busy" for the rest of the visit.
+    // Nothing is opened. The reader asked for a conversation, not for a
+    // change of scene: the board stays where the gesture was made, whether
+    // the request came from the plus's sheet or from a card let go on it.
     BOARD.newSessionBusy = false
     paintNewSessionBusy()
     // The model goes on before the words do: once the draft is sent it is
     // the model on the conversation that answers it.
-    return applyNewSessionModel(sessionId, picked).then(function () {
-      // The words are handed over as a draft, never as a turn: this plugin
-      // opens the conversation and puts the reader's words in its box, and
-      // pressing send stays the reader's own decision. A card carries words
-      // too, and it goes in the same way.
-      if (!body) return true
-      return boardPasteDraft(body, sessionId)
-    })
-  }).then(function (pasted) {
+    return applyNewSessionModel(sessionId, picked)
+  }).then(function () {
     if (cardId) BOARD_STORE.finishCard(cardId, sessionId)
     if (name) {
       renameSession(sessionId, name, function (reason) {
         if (reason) console.warn('[dsh-vim] new session rename refused', reason)
       })
     }
+    // The words are the new conversation's draft, waiting for its box the
+    // way a handed-over card's words do: the same queue, the same blank
+    // line between two of them, and nothing sent on the reader's behalf.
+    if (body) HANDOFF_STORE.push(sessionId, body)
+    // The sheet has done its job and the board is still standing under it.
+    closeNewSessionSheet()
     BOARD.newSessionBusy = false
     paintNewSessionBusy()
-    if (body && pasted === false) {
-      // The conversation is open and named; only the words did not land,
-      // and saying so is what keeps them from being lost silently.
-      showToast(paletteText('boardNewSessionPasteFailed'))
-    } else if (cardId) {
+    if (cardId) {
       showToast(paletteText('boardNewSessionDropped'))
     } else {
       showToast(paletteText('boardNewSessionCreated') + (name || noteParts(body).title))
@@ -492,6 +491,5 @@ function startNewSessionForGoal(goalKey, title, text, cardId) {
 // ---------------------------------------------------------------------
 // tidying the canvas
 // ---------------------------------------------------------------------
-
 
 export { closeNewSessionSheet, paintNewSessionModel, openNewSessionSheet, startNewSessionForGoal, applyNewSessionModel }

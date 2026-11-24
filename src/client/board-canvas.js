@@ -166,10 +166,19 @@ function boardBlocks(pool) {
     if (BOARD_STORE.isMuted(row.id, row.updatedAt)) continue
     var marked = BOARD_STORE.isStarred(row.id)
     if (BOARD.onlyStarred && !marked) continue
+    // A conversation the board itself filed has no turn in it yet, so the
+    // host still calls it blank and the shell hides it: the card is the
+    // only door it has, and a door nobody can see is a draft nobody can
+    // read. One the board filed is drawn, and the day's boundary does not
+    // apply to it - a draft nobody has opened is still waiting, not
+    // yesterday's work. Blank and unfiled is an empty slot of the shell's
+    // own, and stays out.
+    var filedDraft = Boolean(row.blank) && Boolean(BOARD_STORE.placementOf(row.id))
+    if (row.blank && !filedDraft) continue
     // A conversation the reader has not touched today is off the board -
     // unless it was carried in from the last page, which is the one thing
     // that outlives the day's boundary without being marked.
-    if (!marked && !CARRY.from(row.id) && (Number(row.updatedAt) || 0) < since) continue
+    if (!filedDraft && !marked && !CARRY.from(row.id) && (Number(row.updatedAt) || 0) < since) continue
     var goal = goalOfRow(row, folders)
     var block = groups[goal.key]
     if (!block) {
@@ -487,7 +496,7 @@ function boardPanelWidths() {
  *   heights fall back to the height every panel is planned at.
  * @returns {{width: number, height: number}} the stage, in pixels.
  */
-function boardExtent(places, heights, widths) {
+function boardExtent(places, heights, widths, cards) {
   var width = 720
   var height = 520
   for (var key in places) {
@@ -498,10 +507,12 @@ function boardExtent(places, heights, widths) {
     var tall = heights && heights[key] ? heights[key] : BOARD_BLOCK_H
     height = Math.max(height, place.y + tall + BOARD_CANVAS_EDGE)
   }
-  var cards = BOARD_STORE.cards()
-  for (var i = 0; i < cards.length; i++) {
-    width = Math.max(width, cards[i].x + BOARD_CARD_W + BOARD_CANVAS_EDGE)
-    height = Math.max(height, cards[i].y + boardCardBox(cards[i].text, cards[i].h).height + BOARD_CANVAS_EDGE)
+  // A page hands its own thoughts in: the paper it needs is the paper those
+  // cards stand on, which is not what today's store holds.
+  var listed = cards || BOARD_STORE.cards()
+  for (var i = 0; i < listed.length; i++) {
+    width = Math.max(width, listed[i].x + BOARD_CARD_W + BOARD_CANVAS_EDGE)
+    height = Math.max(height, listed[i].y + boardCardBox(listed[i].text, listed[i].h).height + BOARD_CANVAS_EDGE)
   }
   return { width: width, height: height }
 }
@@ -934,22 +945,24 @@ function tidyPlan(cards, panels) {
 }
 
 /**
- * The order a tidy packs panels in: left to right, top to bottom, tray last.
+ * The order a tidy packs panels in: the tray first, then left to right,
+ * top to bottom.
  *
- * A tidy that reshuffled the reader's goals would make the canvas a new
- * place to learn, so the order it packs by is the order the eye already
- * reads: the panel standing highest first, then the one to its right. The
- * inbox is the exception and always goes last: it is the tray everything
- * falls into, and it belongs at the end of the flow rather than in the
- * middle of the work.
+ * The inbox is the exception and always goes first: it is the tray
+ * everything falls into, so it stands in the canvas's own top left corner
+ * where the eye lands first and where a thought dragged back out of it has
+ * the shortest way to the work. A tidy that reshuffled the reader's goals
+ * would make the canvas a new place to learn, so everything else packs by
+ * the order the eye already reads: the panel standing highest first, then
+ * the one to its right.
  * @param {Array<object>} panels - the panel records.
  * @returns {Array<object>} the same panels, in packing order.
  */
 function tidyPanelOrder(panels) {
   return (panels || []).slice().sort(function (left, right) {
     if (left.kind !== right.kind) {
-      if (left.kind === 'inbox') return 1
-      if (right.kind === 'inbox') return -1
+      if (left.kind === 'inbox') return -1
+      if (right.kind === 'inbox') return 1
     }
     if (left.y !== right.y) return left.y - right.y
     if (left.x !== right.x) return left.x - right.x
@@ -1019,19 +1032,79 @@ function tidyPlaces(panels) {
 }
 
 /**
- * Tidy the canvas: put the thoughts where they belong, then lay the panels
- * out as an even grid that fits the window.
+ * Pack the panels the moment the board opens onto a canvas that went stale.
  *
- * A thought with nothing to belong to is what the inbox is for, so this is
- * the press that gathers them: every card with no tie is put away in the
- * tray, where the reader can still see it and take it back out. That is
- * done before anything is measured, and painted at once, because the tray
- * grows by one line per card and its new height is part of the layout.
+ * A board the reader left shaped for yesterday's conversations is a board
+ * whose panels may have grown into each other since: a goal that gained one
+ * while the window was closed is wider than the packing assumed. The tidy
+ * press is one way out of that, but needing a key to come back to a readable
+ * canvas is the board's fault, not the reader's. So the packing happens on
+ * sight, silently and at once - no glide, because the reader never saw the
+ * old places - and the thoughts on the paper are left exactly where they
+ * were written.
+ * @returns {boolean} whether the canvas was repacked.
+ */
+function settleBoardOverlap() {
+  if (!BOARD.open || !BOARD.stage) return false
+  if (!boardPanelsOverlap()) return false
+  var panels = tidyPanels()
+  var places = tidyPlaces(panels)
+  var moved = false
+  for (var i = 0; i < panels.length; i++) {
+    var panel = panels[i]
+    var place = places[panel.key]
+    if (!place) continue
+    if (Math.abs(panel.x - place.x) < 1 && Math.abs(panel.y - place.y) < 1) continue
+    BOARD_STORE.placeBlock(panel.key, place.x, place.y)
+    moved = true
+  }
+  if (!moved) return false
+  boardRepaint()
+  return true
+}
+
+/**
+ * Whether two panels on this canvas stand on each other.
  *
- * The panels come next, packed as rows with the same air between them (see
- * `tidyPlaces`). A panel that moves glides there, and the loose cards are
- * placed once the panels have settled, so a thought tied to a conversation
- * that is not on the canvas still stands clear of the new rows.
+ * A panel is as wide as its columns and as tall as its conversations, so a
+ * goal that gained one while the board was closed is a goal the packing was
+ * never planned for: on the way back in, it can be standing on its
+ * neighbour. That is the one mess the reader should not have to press a key
+ * to fix, so the board checks for it as it opens (see `openBoard`).
+ * @returns {boolean} whether any two panels overlap.
+ */
+function boardPanelsOverlap() {
+  var panels = tidyPanels()
+  for (var i = 0; i < panels.length; i++) {
+    for (var j = i + 1; j < panels.length; j++) {
+      var left = panels[i]
+      var right = panels[j]
+      var across = Math.min(left.x + left.width, right.x + right.width) - Math.max(left.x, right.x)
+      var down = Math.min(left.y + left.height, right.y + right.height) - Math.max(left.y, right.y)
+      // A shared edge is not an overlap: the tolerance is there because a
+      // panel's width is rounded on its way into the store.
+      if (across > 1 && down > 1) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Tidy the canvas: lay the panels out as an even grid that fits the window.
+ *
+ * This is a press about the *panels*, not about the thoughts. A card the
+ * reader left on the paper stays where they left it, tied or not: filing is
+ * a gesture, and a board that gathered loose thoughts into the inbox behind
+ * their back was answering a question nobody asked. What still moves is the
+ * one kind of card that cannot stand on its own - a thought tied to a
+ * conversation this paint does not draw has no column, and gets the column
+ * beside the tray (see `tidyLooseCards`). A locked card is left alone
+ * wherever it is.
+ *
+ * The panels are packed as rows with the same air between them (see
+ * `tidyPlaces`), and the loose cards are placed once the panels have
+ * settled, so a thought tied to a conversation that is not on the canvas
+ * still stands clear of the new rows.
  * @returns {boolean} whether anything was moved.
  */
 function tidyBoard() {
@@ -1048,25 +1121,9 @@ function tidyBoard() {
     BOARD.cardEditing = ''
     BOARD.cardEditor = null
   }
-  var cards = BOARD_STORE.cards()
-  var filed = 0
-  for (var c = 0; c < cards.length; c++) {
-    var card = cards[c]
-    // A tie is what keeps a thought on the paper; a card put away already
-    // has a place, and one with no tie has none.
-    if (card.filed || card.link) continue
-    if (BOARD_STORE.fileCard(card.id, BOARD_INBOX)) filed = filed + 1
-  }
-  if (filed) {
-    // The tray's new lines are laid out by this paint, and its height is
-    // what the packing below measures: one paint before, one after.
-    // A tray folded away must not swallow what a tidy just gathered: the
-    // reader has to see where the thoughts went.
-    if (BOARD_STORE.isFolded(BOARD_INBOX)) BOARD_STORE.toggleBlockFold(BOARD_INBOX)
-    boardRepaint()
-    if (!BOARD.open) return true
-    showToast(paletteText('boardFiled'))
-  }
+  // A tidy moves panels, not thoughts: a card the reader left on the paper
+  // stays exactly where they left it, tied or not. Filing is a gesture, and
+  // only a gesture - the board never puts a thought away behind their back.
   var panels = tidyPanels()
   var places = tidyPlaces(panels)
   var batch = []
@@ -1102,7 +1159,7 @@ function tidyBoard() {
   }
   tidyLooseCards()
   if (BOARD.fits) fitBoardToWindow()
-  return filed > 0
+  return false
 }
 
 /**
@@ -1119,8 +1176,11 @@ function tidyLooseCards() {
   var loose = []
   for (var i = 0; i < cards.length; i++) {
     // A card drawn under its conversation is not on the paper, so a tidy
-    // has no place to give it.
-    if (cards[i].filed || boardCardStacked(cards[i])) continue
+    // has no place to give it. A free card is not a tidy's business either:
+    // where the reader wrote it is where it stays. Curtained and locked
+    // cards are the reader's own decisions, and a tidy leaves both alone.
+    if (cards[i].filed || boardCardStacked(cards[i]) || cards[i].locked) continue
+    if (!cards[i].link) continue
     loose.push(cards[i])
   }
   if (!loose.length) return false
@@ -1854,4 +1914,4 @@ function parkCardOutside(sessionId, cardId) {
 }
 
 
-export { parkCardOutside, workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, goalByKey, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardTextRows, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, nearestGoal, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, tidyLooseCards, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, boardNoteCols, slotHue }
+export { parkCardOutside, workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, goalByKey, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardTextRows, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, nearestGoal, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, tidyLooseCards, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, boardNoteCols, slotHue, settleBoardOverlap }

@@ -276,7 +276,7 @@ function onNativeDragEnd() {
  * @returns {void}
  */
 function onBoardDragOver(ev) {
-  if (!BOARD.open || !boardDragHasText(ev)) return
+  if (!BOARD.open || BOARD.historyDate || !boardDragHasText(ev)) return
   if (typeof ev.preventDefault === 'function') ev.preventDefault()
   if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
   markDropGoal(Number(ev.clientX) || 0, Number(ev.clientY) || 0, ev.target)
@@ -312,15 +312,15 @@ function onBoardDragLeave(ev) {
  * @returns {void}
  */
 function onBoardDrop(ev) {
-  if (!BOARD.open) return
+  if (!BOARD.open || BOARD.historyDate) return
   if (typeof ev.preventDefault === 'function') ev.preventDefault()
   clearBoardDragGoal()
   var payload = boardDragText(ev)
   if (!payload) return
   var known = sessionInPayload(payload)
   if (!known) {
-showToast(paletteText('boardDragUnknown'))
-return
+    showToast(paletteText('boardDragUnknown'))
+    return
   }
   dropSessionOntoBoard(known.id, goalUnder(Number(ev.clientX) || 0, Number(ev.clientY) || 0, ev.target))
 }
@@ -1105,37 +1105,42 @@ function onBoardUp() {
   var landedOn = ''
   var byEnter = false
   var newSessionGoal = ''
+  var laneTarget = ''
   if (moved && kind === 'note' && drag.lastX !== undefined
-&& typeof document.elementFromPoint === 'function') {
-try {
-  var under = document.elementFromPoint(drag.lastX, drag.lastY)
-  if (under && typeof under.closest === 'function') {
-    // The plus is a goal's door, and so is the row it stands in: a card
-    // let go anywhere on the heading - the name included - starts the
-    // same conversation the plus starts, with the card's own words.
-    var newSession = under.closest('[data-role="goalNewSession"]')
-    if (newSession) newSessionGoal = newSession.getAttribute('data-goal-key') || ''
-    else newSessionGoal = goalHeadKeyUnder(under)
-    byEnter = under.closest('[data-role="cardEnter"]') !== null
-    var holder = under.closest('[data-session-id]')
-    if (holder) landedOn = holder.getAttribute('data-session-id') || ''
-    // A conversation's column is one target: the pile under the card,
-    // or the card itself, both mean "file this thought under that
-    // conversation". Where in the pile it lands is read from the height
-    // the pointer let go at.
-    var stackEl = under.closest('[data-role="cardStack"]')
-    var columnEl = stackEl ? stackEl : under.closest('[data-column]')
-    if (columnEl) {
-      stackedTarget = stackEl
-        ? stackEl.getAttribute('data-session') || ''
-        : columnEl.getAttribute('data-column') || ''
+    && typeof document.elementFromPoint === 'function') {
+    try {
+      var under = document.elementFromPoint(drag.lastX, drag.lastY)
+      if (under && typeof under.closest === 'function') {
+        // The plus is a goal's door, and so is the row it stands in: a card
+        // let go anywhere on the heading - the name included - starts the
+        // same conversation the plus starts, with the card's own words.
+        var newSession = under.closest('[data-role="goalNewSession"]')
+        if (newSession) newSessionGoal = newSession.getAttribute('data-goal-key') || ''
+        else newSessionGoal = goalHeadKeyUnder(under)
+        byEnter = under.closest('[data-role="cardEnter"]') !== null
+        // The goal's own lane is a target of its own: letting a thought go
+        // there files it under what the reader did about that goal.
+        var laneEl = under.closest('[data-role="goalLane"]')
+        if (laneEl) laneTarget = laneEl.getAttribute('data-block') || ''
+        var holder = under.closest('[data-session-id]')
+        if (holder) landedOn = holder.getAttribute('data-session-id') || ''
+        // A conversation's column is one target: the pile under the card,
+        // or the card itself, both mean "file this thought under that
+        // conversation". Where in the pile it lands is read from the height
+        // the pointer let go at.
+        var stackEl = under.closest('[data-role="cardStack"]')
+        var columnEl = stackEl ? stackEl : under.closest('[data-column]')
+        if (columnEl) {
+          stackedTarget = stackEl
+            ? stackEl.getAttribute('data-session') || ''
+            : columnEl.getAttribute('data-column') || ''
+        }
+      }
+    } catch (error) {
+      landedOn = ''
+      byEnter = false
+      newSessionGoal = ''
     }
-  }
-} catch (error) {
-  landedOn = ''
-  byEnter = false
-  newSessionGoal = ''
-}
   }
   var overGoal = moved && drag.lastX !== undefined ? goalUnder(drag.lastX, drag.lastY) : ''
   endBoardDrag()
@@ -1146,16 +1151,16 @@ try {
   // to open. Every other press leaves the debt to its own click, which
   // repaints when it opens what it aimed at.
   if (BOARD.paintOwed) {
-if (kind === 'pan') {
-  renderBoard()
-} else if (!moved && kind === 'note') {
-  var settleCards = BOARD_STORE.cards()
-  var stillWritten = false
-  for (var sc = 0; sc < settleCards.length; sc++) {
-    if (settleCards[sc].id === key) { stillWritten = true; break }
-  }
-  if (!stillWritten) renderBoard()
-}
+    if (kind === 'pan') {
+      boardRepaint()
+    } else if (!moved && kind === 'note') {
+      var settleCards = BOARD_STORE.cards()
+      var stillWritten = false
+      for (var sc = 0; sc < settleCards.length; sc++) {
+        if (settleCards[sc].id === key) { stillWritten = true; break }
+      }
+      if (!stillWritten) renderBoard()
+    }
   }
   // A press that never moved is a click, and the click is still on its way:
   // the browser dispatches it to the element that was pressed, so repainting
@@ -1165,190 +1170,198 @@ if (kind === 'pan') {
 
   if (kind === 'pan') return
   if (kind === 'goal') {
-BOARD_STORE.placeBlock(key, x, y)
-renderBoard()
-return
+    BOARD_STORE.placeBlock(key, x, y)
+    boardRepaint()
+    return
   }
   if (kind === 'session') {
-var home = boardHomeOf(key)
-var wasDone = !!(home && home.done && home.done.some(function (row) {
-  return row.id === key
-}))
-// The finished strip is a drop target of its own, and it outranks the
-// sort: a card let go on it is finished for the day, wherever it stood
-// a moment before. A card carried to another goal's strip is filed
-// there as well, so the strip never holds a conversation the goal no
-// longer carries.
-var doneTarget = drag.lastX === undefined ? null : doneBarUnder(drag.lastX, drag.lastY)
-if (doneTarget) {
-  var barGoal = doneTarget.getAttribute('data-block') || ''
-  if (barGoal) {
-    if (!home || home.key !== barGoal) BOARD_STORE.placeSession(key, barGoal)
-    sendToDone(key)
-    showToast(paletteText('boardDoneMoved'))
-    renderBoard()
+    var home = boardHomeOf(key)
+    var wasDone = !!(home && home.done && home.done.some(function (row) {
+      return row.id === key
+    }))
+    // The finished strip is a drop target of its own, and it outranks the
+    // sort: a card let go on it is finished for the day, wherever it stood
+    // a moment before. A card carried to another goal's strip is filed
+    // there as well, so the strip never holds a conversation the goal no
+    // longer carries.
+    var doneTarget = drag.lastX === undefined ? null : doneBarUnder(drag.lastX, drag.lastY)
+    if (doneTarget) {
+      var barGoal = doneTarget.getAttribute('data-block') || ''
+      if (barGoal) {
+        if (!home || home.key !== barGoal) BOARD_STORE.placeSession(key, barGoal)
+        sendToDone(key)
+        showToast(paletteText('boardDoneMoved'))
+        boardRepaint()
+        return
+      }
+    }
+    // A card carried out of the strip is finished no longer, whether it was
+    // let go on the work above, on another goal, or on the paper. This is
+    // the other half of the mark: the reader can take the word back.
+    if (wasDone) {
+      bringBackFromDone(key)
+      if (overGoal && home && overGoal !== home.key) {
+        BOARD_STORE.placeSession(key, overGoal)
+        showToast(paletteText('boardMoved'))
+      } else {
+        showToast(paletteText('boardDoneRestored'))
+      }
+      boardRepaint()
+      return
+    }
+    // A quiet line carried anywhere is a quiet line the reader has touched:
+    // the strip's own rule asks for that touch, and the drag is it. The
+    // wake is written before the move, so the card is a column in whichever
+    // goal it lands in.
+    if (drag.quiet) {
+      BOARD_STORE.markSessionWoke(key)
+      if (overGoal && home && overGoal !== home.key) {
+        BOARD_STORE.placeSession(key, overGoal)
+        showToast(paletteText('boardMoved'))
+      }
+      boardRepaint()
+      return
+    }
+    // A drag that never left its panel was a sort, not a move. A hand that
+    // did leave is a move, and the order was never written while it was
+    // inside: the columns have already gone back with the gesture.
+    if (reorderState && reorderState.key) {
+      var sortSeat = reorderState.panel && typeof reorderState.panel.getBoundingClientRect === 'function'
+        ? reorderState.panel.getBoundingClientRect()
+        : null
+      if (!sortSeat || panelHolds(sortSeat,
+        drag.lastX === undefined ? 0 : drag.lastX,
+        drag.lastY === undefined ? 0 : drag.lastY)) {
+        commitSessionReorder(reorderState)
+        return
+      }
+    }
+    // A conversation always belongs to a goal. Letting go over one files it
+    // there; letting go on the paper gives it a goal of its own, cut from the
+    // one it came from - a card standing alone is a goal with one card in it,
+    // because a card with no goal is a place the canvas would have to invent.
+    var target = overGoal
+    if (!target) {
+      // Except the last one. A goal that gives up its only conversation to
+      // the paper has not moved anything: it has built a second goal of one
+      // and emptied the first, which is the same arrangement with one more
+      // panel on it. A conversation that wants a place of its own has to be
+      // carried into another goal, where the move actually means something.
+      if (home && home.rows.length <= 1) {
+        showToast(paletteText('boardGoalLastCard'))
+        boardRepaint()
+        return
+      }
+      var point = canvasPointOf(drag.lastX === undefined ? 0 : drag.lastX,
+        drag.lastY === undefined ? 0 : drag.lastY)
+      target = BOARD_STORE.addGoal(
+        nextGoalName(home ? home.label : ''),
+        Math.max(0, point.x - BOARD_FLOAT_W / 2),
+        Math.max(0, point.y - 32)
+      )
+    }
+    if (target && (!home || target !== home.key)) {
+      BOARD_STORE.placeSession(key, target)
+      showToast(paletteText('boardMoved'))
+    }
+    boardRepaint()
     return
-  }
-}
-// A card carried out of the strip is finished no longer, whether it was
-// let go on the work above, on another goal, or on the paper. This is
-// the other half of the mark: the reader can take the word back.
-if (wasDone) {
-  bringBackFromDone(key)
-  if (overGoal && home && overGoal !== home.key) {
-    BOARD_STORE.placeSession(key, overGoal)
-    showToast(paletteText('boardMoved'))
-  } else {
-    showToast(paletteText('boardDoneRestored'))
-  }
-  renderBoard()
-  return
-}
-// A quiet line carried anywhere is a quiet line the reader has touched:
-// the strip's own rule asks for that touch, and the drag is it. The
-// wake is written before the move, so the card is a column in whichever
-// goal it lands in.
-if (drag.quiet) {
-  BOARD_STORE.markSessionWoke(key)
-  if (overGoal && home && overGoal !== home.key) {
-    BOARD_STORE.placeSession(key, overGoal)
-    showToast(paletteText('boardMoved'))
-  }
-  renderBoard()
-  return
-}
-// A drag that never left its panel was a sort, not a move. A hand that
-// did leave is a move, and the order was never written while it was
-// inside: the columns have already gone back with the gesture.
-if (reorderState && reorderState.key) {
-  var sortSeat = reorderState.panel && typeof reorderState.panel.getBoundingClientRect === 'function'
-    ? reorderState.panel.getBoundingClientRect()
-    : null
-  if (!sortSeat || panelHolds(sortSeat,
-    drag.lastX === undefined ? 0 : drag.lastX,
-    drag.lastY === undefined ? 0 : drag.lastY)) {
-    commitSessionReorder(reorderState)
-    return
-  }
-}
-// A conversation always belongs to a goal. Letting go over one files it
-// there; letting go on the paper gives it a goal of its own, cut from the
-// one it came from - a card standing alone is a goal with one card in it,
-// because a card with no goal is a place the canvas would have to invent.
-var target = overGoal
-if (!target) {
-  // Except the last one. A goal that gives up its only conversation to
-  // the paper has not moved anything: it has built a second goal of one
-  // and emptied the first, which is the same arrangement with one more
-  // panel on it. A conversation that wants a place of its own has to be
-  // carried into another goal, where the move actually means something.
-  if (home && home.rows.length <= 1) {
-    showToast(paletteText('boardGoalLastCard'))
-    renderBoard()
-    return
-  }
-  var point = canvasPointOf(drag.lastX === undefined ? 0 : drag.lastX,
-    drag.lastY === undefined ? 0 : drag.lastY)
-  target = BOARD_STORE.addGoal(
-    nextGoalName(home ? home.label : ''),
-    Math.max(0, point.x - BOARD_FLOAT_W / 2),
-    Math.max(0, point.y - 32)
-  )
-}
-if (target && (!home || target !== home.key)) {
-  BOARD_STORE.placeSession(key, target)
-  showToast(paletteText('boardMoved'))
-}
-renderBoard()
-return
   }
   if (kind !== 'note') return
   // The plus's second gesture: a card let go on it starts the conversation
   // the card describes, with no sheet in between. The card is read before
   // the gesture is gone, because the board may be unmounted by the open.
   if (newSessionGoal) {
-var picked = null
-var written = BOARD_STORE.cards()
-for (var np = 0; np < written.length; np++) {
-  if (written[np].id === key) picked = written[np]
-}
-var words = picked ? String(picked.text || '').trim() : ''
-if (!words) {
-  renderBoard()
-  return
-}
-var cardName = noteParts(words).title.trim()
-if (!cardName) cardName = words.slice(0, BOARD_GOAL_NAME_MAX)
-if (!startNewSessionForGoal(newSessionGoal, cardName, words, key) && BOARD.open) renderBoard()
-return
+    var picked = null
+    var written = BOARD_STORE.cards()
+    for (var np = 0; np < written.length; np++) {
+      if (written[np].id === key) picked = written[np]
+    }
+    var words = picked ? String(picked.text || '').trim() : ''
+    if (!words) {
+      boardRepaint()
+      return
+    }
+    var cardName = noteParts(words).title.trim()
+    if (!cardName) cardName = words.slice(0, BOARD_GOAL_NAME_MAX)
+    if (!startNewSessionForGoal(newSessionGoal, cardName, words, key) && BOARD.open) renderBoard()
+    return
+  }
+  // A thought let go in a goal's human lane is filed there: that row is
+  // the reader's own side of the goal, and the card joins it as a line.
+  if (laneTarget) {
+    BOARD_STORE.fileCard(key, laneTarget)
+    boardRepaint()
+    showToast(paletteText('boardLaneFiled'))
+    return
   }
   // Let go over the tray itself (not over a card in it): the note is put
   // away there, and drawn as a line of the tray from the next paint on.
   if (!landedOn && overGoal === BOARD_INBOX) {
-BOARD_STORE.fileCard(key, BOARD_INBOX)
-// A tray that is folded would swallow the card without a trace: the one
-// thing the reader must see is where it went.
-if (BOARD_STORE.isFolded(BOARD_INBOX)) BOARD_STORE.toggleBlockFold(BOARD_INBOX)
-renderBoard()
-showToast(paletteText('boardFiled'))
-return
+    BOARD_STORE.fileCard(key, BOARD_INBOX)
+    // A tray that is folded would swallow the card without a trace: the one
+    // thing the reader must see is where it went.
+    if (BOARD_STORE.isFolded(BOARD_INBOX)) BOARD_STORE.toggleBlockFold(BOARD_INBOX)
+    boardRepaint()
+    showToast(paletteText('boardFiled'))
+    return
   }
   // A thought let go into a conversation's column is filed there, at the
   // point in the pile the pointer chose. This is the whole of the tie now:
   // no line is drawn, because the card is drawn under the conversation.
   if (stackedTarget && !byEnter) {
-// The whole column is the target now: landing anywhere in it - the card,
-// the gap above the pile, the gap below it - files the thought under that
-// conversation, and the newest filing goes to the top of the pile.
-var sameFamily = stackedTarget === fromStack
-BOARD_STORE.linkCard(key, stackedTarget)
-renderBoard()
-if (!sameFamily) showToast(paletteText('boardCardFiledUnder'))
-return
+    // The whole column is the target now: landing anywhere in it - the card,
+    // the gap above the pile, the gap below it - files the thought under that
+    // conversation, and the newest filing goes to the top of the pile.
+    var sameFamily = stackedTarget === fromStack
+    BOARD_STORE.linkCard(key, stackedTarget)
+    boardRepaint()
+    if (!sameFamily) showToast(paletteText('boardCardFiledUnder'))
+    return
   }
   if (landedOn) {
-var cards = BOARD_STORE.cards()
-var held = null
-for (var i = 0; i < cards.length; i++) {
-  if (cards[i].id === key) held = cards[i]
-}
-var text = held ? String(held.text || '').trim() : ''
-// A note that is already finished is not handed over again: the band it
-// was let go on says "file this card", and filing it is what happens - it
-// joins that conversation's own list of finished thoughts.
-if (byEnter && held && held.done) {
-  BOARD_STORE.linkCard(key, landedOn)
-  BOARD_STORE.fileCard(key, BOARD_DONE)
-  BOARD.rowOpen = ''
-  renderBoard()
-  showToast(paletteText('boardDoneFiledOne'))
-  return
-}
-if (byEnter) {
-  // The button is the deliberate target: it means "take this into that
-  // conversation", and it is specific enough not to need a question.
-  // The place is measured before the conversation opens, because that
-  // unmounts the board and there is nothing left to measure afterwards.
-  if (text) {
+    var cards = BOARD_STORE.cards()
+    var held = null
+    for (var i = 0; i < cards.length; i++) {
+      if (cards[i].id === key) held = cards[i]
+    }
+    var text = held ? String(held.text || '').trim() : ''
+    // A note that is already finished is not handed over again: the band it
+    // was let go on says "file this card", and filing it is what happens - it
+    // joins that conversation's own list of finished thoughts.
+    if (byEnter && held && held.done) {
+      BOARD_STORE.linkCard(key, landedOn)
+      BOARD_STORE.fileCard(key, BOARD_DONE)
+      BOARD.rowOpen = ''
+      boardRepaint()
+      showToast(paletteText('boardDoneFiledOne'))
+      return
+    }
+    if (byEnter) {
+      // The button is the deliberate target: it means "take this into that
+      // conversation", and it is specific enough not to need a question.
+      // The place is measured before the conversation opens, because that
+      // unmounts the board and there is nothing left to measure afterwards.
+      if (text) {
+        BOARD_STORE.linkCard(key, landedOn)
+        handCardToSession(key, landedOn, text)
+      } else {
+        boardOpenSession(landedOn)
+      }
+      return
+    }
+    // Anywhere else on the card is the gentler claim: the thought belongs
+    // under this conversation, so it joins the bottom of its pile - nothing
+    // opens, and nothing is sent.
     BOARD_STORE.linkCard(key, landedOn)
-    handCardToSession(key, landedOn, text)
-  } else {
-    boardOpenSession(landedOn)
-  }
-  return
-}
-// Anywhere else on the card is the gentler claim: the thought belongs
-// under this conversation, so it joins the bottom of its pile - nothing
-// opens, and nothing is sent.
-BOARD_STORE.linkCard(key, landedOn)
-renderBoard()
-return
+    boardRepaint()
+    return
   }
   // Let go on the paper: a card out of a pile goes back to being a free card
   // where the hand let go; a free card simply moves.
   if (fromStack) BOARD_STORE.unlinkCard(key)
   BOARD_STORE.moveCard(key, Math.max(0, x), Math.max(0, y))
-  renderBoard()
+  boardRepaint()
 }
 
 /**
@@ -1495,24 +1508,29 @@ function onBoardBlurDrag() {
  */
 function onBoardDoubleClick(ev) {
   if (!BOARD.open || !BOARD.stage) return
+  // A page has nowhere to write a thought: the double press that writes one
+  // is a press on today's paper, and this is not today's paper.
+  if (BOARD.historyDate) return
   if (BOARD.dragged) {
-BOARD.dragged = false
-return
+    BOARD.dragged = false
+    return
   }
   var target = ev && ev.target
   if (target && target !== BOARD.stage && target !== BOARD.body) return
   var rect = typeof BOARD.stage.getBoundingClientRect === 'function'
-? BOARD.stage.getBoundingClientRect()
-: null
+    ? BOARD.stage.getBoundingClientRect()
+    : null
   var zoom = BOARD.zoom || 1
   var x = rect ? ((Number(ev.clientX) || 0) - rect.left) / zoom : BOARD_CANVAS_EDGE
   var y = rect ? ((Number(ev.clientY) || 0) - rect.top) / zoom : BOARD_CANVAS_EDGE
   addBoardCardAt(Math.max(0, x), Math.max(0, y), {
-clientX: Number(ev.clientX) || 0,
-clientY: Number(ev.clientY) || 0,
+    clientX: Number(ev.clientX) || 0,
+    clientY: Number(ev.clientY) || 0,
   })
 }
 
-
+// ---------------------------------------------------------------------
+// reasoning level
+// ---------------------------------------------------------------------
 
 export { onNativeDragEnd, onBoardDragOver, onBoardDragLeave, onBoardDrop, boardPointerDown, onBoardDoubleClick, endBoardDrag, cancelBoardDrag, drawCardLinks, boardListen, commitSessionReorder, resetSessionReorder }

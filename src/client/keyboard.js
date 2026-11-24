@@ -8,8 +8,8 @@ import { BOARD } from './board-state.js'
 import { REWRITTEN_FLAG } from './constants.js'
 import { showBoard, toggleBoard } from './app-actions.js'
 import { cancelBoardDrag } from './board-gestures.js'
-import { closeSeal } from './board-history.js'
-import { closeBoard } from './board-mount.js'
+import { backToToday, closeSeal } from './board-history.js'
+import { closeBoard, closeBoardSettings } from './board-mount.js'
 import { openNote, pinToBoard } from './board-notes.js'
 import { closeNewSessionSheet } from './board-sheet.js'
 import { closeGoalMenu, closeIdeaFocus, closeIdeaMenu, closeSeatMenu, closeSessionMenu, closeVerdictMenu } from './board-view.js'
@@ -18,6 +18,7 @@ import { cancelEntry } from './entry.js'
 import { clearFocusRequest, composerIsEmpty, composerRoot, doubleEnter, doubleEnterSends, focusComposer, handBackAfterSend, inComposer, isActivating, leaveEmptyComposer, menuOpen, noteFocusReturn, noteFocusRequest, sendFromComposer, breakLine } from './focus.js'
 import { MODELPICK, closeModelPick, confirmModelPick, modelPickKeyDown, openModelPick } from './model-picker.js'
 import { cycleEffort } from './models.js'
+import { serviceOf, taskCtx } from './sessions.js'
 import { repairKeys, settings } from './preferences.js'
 import { anim, directionOf, hold, pickScroller, pointer, resolveTarget, startHold, state, stopAnim, stopHold } from './scroll.js'
 import { currentSessionRunning } from './sessions.js'
@@ -56,6 +57,15 @@ function onSendKey(ev, key) {
   return !composerIsEmpty(composerRoot())
 }
 
+/**
+ * Capture-phase key handler. Runs before the app's own handlers so the
+ * composer never sees an intercepted key, and bails out on anything the
+ * user is typing into.
+ *
+ * The task window is modal: while it is open it owns every keystroke, and
+ * the scroll engine stays suspended.
+ * @param {KeyboardEvent} ev - keydown event.
+ */
 function onKeyDown(ev) {
   if (ev.defaultPrevented) return
   // The composition guard comes first because a send must never be read out
@@ -205,7 +215,7 @@ function onKeyDown(ev) {
       return
     }
     if (key === 'escape' && (BOARD.ideaMenu || BOARD.sessionMenu || BOARD.seatMenu
-      || BOARD.goalMenu || BOARD.verdictMenu)) {
+      || BOARD.goalMenu || BOARD.verdictMenu || BOARD.settingsMenu)) {
       ev.preventDefault()
       ev.stopPropagation()
       closeIdeaMenu()
@@ -213,6 +223,15 @@ function onKeyDown(ev) {
       closeSeatMenu()
       closeGoalMenu()
       closeVerdictMenu()
+      closeBoardSettings()
+      return
+    }
+    // Escape leaves the page before it leaves the board: the reader
+    // stepped into a day, and the press steps back out of it.
+    if (key === 'escape' && BOARD.historyDate) {
+      ev.preventDefault()
+      ev.stopPropagation()
+      backToToday()
       return
     }
     if (key === settings.boardKey) {
@@ -234,6 +253,14 @@ function onKeyDown(ev) {
     // is being typed into: Enter keeps the name, Escape throws it away, and
     // neither may be read as a key of the window.
     if (isEditable(ev.target)) return
+    // The same step out of a page, in the floating board: Escape puts the
+    // day away first, and closes the board on the press after it.
+    if (key === 'escape' && BOARD.historyDate) {
+      ev.preventDefault()
+      ev.stopPropagation()
+      backToToday()
+      return
+    }
     // Escape is the one way out of a gesture, and it is the gesture's while
     // one is in progress: dropping a card is an easier mistake to make than
     // closing a window by accident.
@@ -248,7 +275,7 @@ function onKeyDown(ev) {
       return
     }
     if (key === 'escape' && (BOARD.ideaMenu || BOARD.sessionMenu || BOARD.seatMenu
-      || BOARD.goalMenu || BOARD.verdictMenu)) {
+      || BOARD.goalMenu || BOARD.verdictMenu || BOARD.settingsMenu)) {
       ev.preventDefault()
       ev.stopPropagation()
       closeIdeaMenu()
@@ -256,6 +283,7 @@ function onKeyDown(ev) {
       closeSeatMenu()
       closeGoalMenu()
       closeVerdictMenu()
+      closeBoardSettings()
       return
     }
     if (key === settings.boardKey) {
@@ -609,6 +637,16 @@ function dismissOutsidePress(ev) {
   if (!ev || (ev.button !== undefined && ev.button !== 0)) return
   var target = ev.target
   if (!target) return
+  // The board's settings sheet is a sheet, not a window: the next press
+  // anywhere but the sheet and its own chip takes it down, and the press
+  // still does whatever it meant to do. Read here, before the window tests
+  // — those leave a board page alone by design, and this sheet sits on it.
+  if (BOARD.settingsMenu) {
+    var onSettings = typeof target.closest === 'function'
+      ? target.closest('[data-role="boardSettings"], [data-role="boardSettingsMenu"]')
+      : null
+    if (!onSettings) closeBoardSettings()
+  }
   if (PALETTE.open && !pressMissesWindow(PALETTE.host, target)) return
   if (MODELPICK.open && !pressMissesWindow(MODELPICK.host, target)) return
   if (BOARD.open && !pressMissesWindow(BOARD.host, target)) return
@@ -675,17 +713,41 @@ function pointInSelection(x, y) {
 }
 
 /**
- * The way back from a conversation: a right press on its page.
+ * Leave the board's page for the conversation it was opened from.
+ *
+ * The page is a main view, not a window: there is nothing to close, only
+ * the layout's own "no panel" to ask for, which is the state the board key
+ * leaves behind as well. Selecting it can only ever go back, so a press
+ * that lands while the page is on its way out cannot bring it back up.
+ * @returns {boolean} whether the page was left.
+ */
+function leaveBoardPage() {
+  var layout = serviceOf(taskCtx, 'layout')
+  if (!layout || typeof layout.selectPanel !== 'function') return false
+  closePalette()
+  closeModelPick()
+  try {
+    layout.selectPanel(null)
+  } catch (error) {
+    console.warn('[dsh-vim] could not leave the board page', error)
+    return false
+  }
+  return true
+}
+
+/**
+ * The way between a conversation and the board: a right press, both ways.
  *
  * The conversation's own right button is unemployed — the shell keeps its
  * context menus in the sidebar, and the transcript answers a right press
  * with nothing at all — so the one button with no meaning becomes the
  * shortest way back to the board the conversation was entered from. The
- * press is read from the conversation's own body (the shell marks it, and
- * the sidebar, other pages and every floating window do not carry the
- * mark), and three presses keep the meaning they already have: one some
- * other handler answered first, one in the box being typed into, and one
- * inside a text selection, which is a copy.
+ * board's own page, which never used it either, answers the same press the
+ * other way round: back to the conversation behind it. Each page is read
+ * from its own marked root (the shell marks the conversation's body, and
+ * the board page marks itself), and three presses keep the meaning they
+ * already have: one some other handler answered first, one in a box being
+ * typed into, and one inside a text selection, which is a copy.
  * @param {object} ev - the contextmenu event.
  * @returns {void}
  */
@@ -694,12 +756,15 @@ function onContextMenu(ev) {
   if (!target || target.nodeType !== 1) return
   if (ev.defaultPrevented) return
   if (typeof target.closest !== 'function') return
-  if (!target.closest('[data-conversation-content]')) return
+  var boardPage = target.closest('[data-role="boardPage"]')
+  if (!boardPage && !target.closest('[data-conversation-content]')) return
   if (isEditable(target)) return
   if (pointInSelection(Number(ev.clientX) || 0, Number(ev.clientY) || 0)) return
+  var taken = boardPage ? leaveBoardPage() : showBoard()
+  // The menu is suppressed only once the press has gone somewhere: a host
+  // that cannot move the reader keeps the menu the button has always had.
+  if (!taken) return
   if (typeof ev.preventDefault === 'function') ev.preventDefault()
-  showBoard()
 }
-
 
 export { onKeyDown, onKeyUp, onEscapeBlur, onPointerMove, forgetPointer, onUserScroll, onFocusLoss, onPointerDown, onContextMenu, dismissOutsidePress, pointInSelection }

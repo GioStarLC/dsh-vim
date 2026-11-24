@@ -22,6 +22,8 @@ const hooks = {
   pasteDraft: function () {
     return Promise.resolve(false)
   },
+  settleEdits: function () {},
+  closeMenus: function () {},
 }
 
 /**
@@ -72,6 +74,16 @@ export function boardShowOverview() {
  */
 export function boardPress(ev) {
   hooks.press(ev)
+}
+
+/** Commit whatever is being typed before the board is left. */
+export function boardSettleEdits() {
+  hooks.settleEdits()
+}
+
+/** Put away every card, seat, goal, verdict and idea menu. */
+export function boardCloseMenus() {
+  hooks.closeMenus()
 }
 
 /** Redraw the tie lines between the canvas and its margins. */

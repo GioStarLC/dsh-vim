@@ -4,14 +4,16 @@
  * panel that reads them back. Repainting is injected — the canvas owns that.
  */
 import { BOARD, boardTitleOf } from './board-state.js'
-import { BOARD_CARRY_DROP_DAYS, HISTORY_EXPORT_KIND, SNAPSHOT_KEEP_DEFAULT, SNAPSHOT_MOMENT_KEY, SNAPSHOT_VERSION } from './constants.js'
+import { boardCloseMenus, boardSettleEdits } from './board-hooks.js'
+import { BOARD_BLOCK_PAD, BOARD_CANVAS_EDGE, BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_CARRY_DROP_DAYS, HISTORY_EXPORT_KIND, SNAPSHOT_KEEP_DEFAULT, SNAPSHOT_MOMENT_KEY, SNAPSHOT_VERSION } from './constants.js'
 import { settings } from './preferences.js'
 import { attentionOf } from './runs.js'
 import { conversationPool, statusOf } from './sessions.js'
 import { BOARD_STORE, CARRY, HISTORY, JOURNAL, NOTE_STORE } from './board-stores.js'
-import { BOARD_UI } from './board-css.js'
+import { BOARD_INK, BOARD_UI, solidPaper } from './board-css.js'
 import { dayOf, daysBetween } from './time.js'
-import { paletteText } from './strings.js'
+import { localeIsZh, paletteText } from './strings.js'
+import { applyBoardZoom, boardBlockWidth, boardCardBox, boardExtent, boardPanelHeights, boardPanelWidths, goalHue } from './board-canvas.js'
 import { showToast } from './toast.js'
 
 /**
@@ -158,6 +160,10 @@ function pageView(blocks, places, titles, cards, today) {
       x: Math.max(0, Math.round(Number(place.x) || 0)),
       y: Math.max(0, Math.round(Number(place.y) || 0)),
       folded: BOARD_STORE.isFolded(block.key),
+      // The colour it was drawn in, recorded here rather than read back
+      // later: a seat is today's arrangement, and a page drawn from it
+      // would wear whatever colour the goal has grown since.
+      hue: goalHue(block),
     })
     for (var r = 0; r < block.rows.length; r++) {
       var row = block.rows[r]
@@ -181,6 +187,12 @@ function pageView(blocks, places, titles, cards, today) {
       done: listed[c].done === true,
       link: listed[c].link || '',
       filed: listed[c].filed || '',
+      // Where it stood and how tall it was. Without these the page could
+      // still say what was thought but not where, and a canvas drawn from
+      // it would be a list wearing paper.
+      x: Math.max(0, Math.round(Number(listed[c].x) || 0)),
+      y: Math.max(0, Math.round(Number(listed[c].y) || 0)),
+      h: Math.max(0, Math.round(Number(listed[c].h) || 0)),
     })
   }
   return { goals: goals, sessions: sessions, cards: notes }
@@ -609,20 +621,20 @@ function historyHitRow(date, hits) {
     if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
     BOARD.historyQuery = ''
     if (BOARD.historySearch) BOARD.historySearch.value = ''
-    BOARD.historyDate = date
-    BOARD.historyArmed = ''
+    // A hit is a day, and a day is a canvas: the press opens the page and
+    // leaves the search behind, because the question has been answered.
+    viewDay(date)
     renderHistory()
   })
   return row
 }
 
 /**
- * Open the history: the pages the board has been.
+ * Open the history: a calendar of the pages the board has been.
  *
- * Read-only by construction. Nothing here writes a page: the only presses that
- * change anything are the two at the bottom of a day's detail (restore, which
- * copies that page into today and keeps a copy of what it replaced) and the
- * drop, which only ever shortens the carried set.
+ * The panel is only the way in. Choosing a day does not expand anything
+ * here - it turns the canvas itself onto that page, read-only, which is the
+ * whole point of a history being a place rather than a list.
  * @returns {boolean} whether the panel is up.
  */
 function openBoardHistory() {
@@ -631,7 +643,7 @@ function openBoardHistory() {
     closeBoardHistory()
     return false
   }
-  BOARD.historyDate = ''
+  BOARD.historyMonth = monthOf(BOARD.historyDate) || BOARD.historyMonth
   BOARD.historyArmed = ''
   var node = document.createElement('div')
   Object.assign(node.style, BOARD_UI.historyPanel)
@@ -697,12 +709,17 @@ function openBoardHistory() {
   return true
 }
 
-/** Take the history panel down, whichever page it was showing. */
+/**
+ * Take the calendar down.
+ *
+ * The page the canvas is standing on is not the panel's: it stays up after
+ * the calendar is put away, and only "back to today" leaves it. A search,
+ * on the other hand, belongs to a panel that was open.
+ * @returns {void}
+ */
 function closeBoardHistory() {
-  BOARD.historyDate = ''
-  BOARD.historyArmed = ''
   // A search is about a panel that was open: the next visit starts from the
-  // days, not from a query nobody can see.
+  // calendar, not from a query nobody can see.
   BOARD.historyQuery = ''
   BOARD.historySearch = null
   if (BOARD.historyNode && BOARD.historyNode.parentNode) {
@@ -713,11 +730,11 @@ function closeBoardHistory() {
 }
 
 /**
- * Draw the list of days.
+ * Draw the calendar.
  *
  * Only the dates are read to draw it: a page's contents cost one record read
- * each, and a list that opened by reading ten years of them would make the
- * panel slow in exactly the case it matters. A day is read when it is opened.
+ * each, and a calendar that opened by reading ten years of them would be
+ * slow in exactly the case it matters. A day is read when it is opened.
  * @returns {void}
  */
 function renderHistory() {
@@ -738,11 +755,8 @@ function renderHistory() {
     // the database was answering.
     if (!list || BOARD.historyList !== list) return
     list.textContent = ''
-    if (!days.length) {
-      list.appendChild(historyNote(paletteText('boardHistoryEmpty')))
-      return
-    }
-    for (var i = days.length - 1; i >= 0; i--) list.appendChild(historyDayRow(days[i]))
+    list.appendChild(historyCalendar(days || []))
+    if (!(days || []).length) list.appendChild(historyNote(paletteText('boardHistoryEmpty')))
   })
 }
 
@@ -765,150 +779,647 @@ function historyMeta(record) {
     + cards + paletteText('boardHistoryCardsUnit')
 }
 
-/** One day in the list, and its page once it is opened. */
-function historyDayRow(date) {
-  var opened = BOARD.historyDate === date
-  var row = document.createElement('div')
-  Object.assign(row.style, opened ? BOARD_UI.historyDayOpen : BOARD_UI.historyDay)
-  row.setAttribute('data-role', 'historyDay')
-  row.setAttribute('data-date', date)
-  var main = document.createElement('div')
-  Object.assign(main.style, BOARD_UI.historyDayMain)
-  var head = document.createElement('div')
-  Object.assign(head.style, BOARD_UI.historyDayDate)
-  head.textContent = date
-  main.appendChild(head)
-  row.appendChild(main)
-  row.addEventListener('click', function (ev) {
-    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    BOARD.historyDate = opened ? '' : date
-    // Arming belongs to one day at a time: opening another page disarms the
-    // one that was waiting for a second press.
-    BOARD.historyArmed = ''
-    renderHistory()
-  })
+/** The month a `YYYY-MM-DD` day belongs to, or '' when it is not a day. */
+function monthOf(day) {
+  return typeof day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : ''
+}
+
+/** One month, stepped by whole months, as `YYYY-MM`. */
+function addMonths(month, delta) {
+  var year = Number(month.slice(0, 4))
+  var number = Number(month.slice(5, 7)) - 1 + delta
+  year = year + Math.floor(number / 12)
+  number = ((number % 12) + 12) % 12
+  return year + '-' + (number < 9 ? '0' : '') + (number + 1)
+}
+
+/** The months in the words the locale names them by. */
+var HISTORY_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** How a month reads: the reader's own words, not a timestamp. */
+function historyMonthLabel(month) {
+  var year = Number(month.slice(0, 4))
+  var number = Number(month.slice(5, 7))
+  if (localeIsZh()) return year + '年' + number + '月'
+  return HISTORY_MONTHS[number - 1] + ' ' + year
+}
+
+/**
+ * The month grid: every day the board has a page for, one cell each.
+ *
+ * The floor is the oldest page and the ceiling is today, so a step never
+ * lands on a month that could not have anything in it. Days without a page
+ * are still drawn - a calendar with holes in it is not a calendar - but they
+ * are not presses either: a day that was never drawn has nothing to show.
+ * @param {Array<string>} days - every day with a page, oldest first.
+ * @returns {Element} the calendar.
+ */
+function historyCalendar(days) {
   var wrap = document.createElement('div')
-  wrap.appendChild(row)
-  if (opened) wrap.appendChild(historyDetail(date))
+  Object.assign(wrap.style, BOARD_UI.historyCalendar)
+  wrap.setAttribute('data-role', 'historyCalendar')
+  var has = Object.create(null)
+  for (var i = 0; i < days.length; i++) has[days[i]] = true
+  var today = dayOf(Date.now())
+  var floor = days.length ? monthOf(days[0]) : monthOf(today)
+  var ceiling = monthOf(today)
+  var month = BOARD.historyMonth || ceiling
+  if (month < floor) month = floor
+  if (month > ceiling) month = ceiling
+  BOARD.historyMonth = month
+  wrap.appendChild(historyCalendarHead(month, floor, ceiling))
+  var week = document.createElement('div')
+  Object.assign(week.style, BOARD_UI.historyCalWeek)
+  var names = paletteText('boardHistoryWeek').split(' ')
+  for (var w = 0; w < names.length; w++) {
+    var each = document.createElement('span')
+    Object.assign(each.style, BOARD_UI.historyCalWeekday)
+    each.textContent = names[w]
+    week.appendChild(each)
+  }
+  wrap.appendChild(week)
+  var grid = document.createElement('div')
+  Object.assign(grid.style, BOARD_UI.historyCalGrid)
+  grid.setAttribute('data-role', 'historyGrid')
+  var year = Number(month.slice(0, 4))
+  var number = Number(month.slice(5, 7))
+  // Monday first: the week the reader plans a week on, not the one the
+  // Date object counts from.
+  var lead = (new Date(year, number - 1, 1).getDay() + 6) % 7
+  var total = new Date(year, number, 0).getDate()
+  for (var blank = 0; blank < lead; blank++) {
+    var pad = document.createElement('div')
+    Object.assign(pad.style, BOARD_UI.historyCalBlank)
+    grid.appendChild(pad)
+  }
+  for (var day = 1; day <= total; day++) {
+    var date = month + '-' + (day < 10 ? '0' : '') + day
+    grid.appendChild(historyCalendarCell(date, !!has[date], today, BOARD.historyDate))
+  }
+  wrap.appendChild(grid)
   return wrap
 }
 
-/** One day's page, as it read: its goals, their conversations, its cards. */
-function historyDetail(date) {
-  var box = document.createElement('div')
-  Object.assign(box.style, BOARD_UI.historyDetail)
-  box.setAttribute('data-role', 'historyDetail')
+/** The month between the two steps, which are only presses when they lead somewhere. */
+function historyCalendarHead(month, floor, ceiling) {
+  var head = document.createElement('div')
+  Object.assign(head.style, BOARD_UI.historyCalHead)
+  head.setAttribute('data-role', 'historyCalHead')
+  /** One step, live only when there is a month on that side of this one. */
+  function step(label, role, to, hint, live) {
+    var each = document.createElement('span')
+    Object.assign(each.style, live ? BOARD_UI.historyCalNav : BOARD_UI.historyCalNavOff)
+    each.setAttribute('data-role', role)
+    if (!live) {
+      each.setAttribute('data-off', 'true')
+      return each
+    }
+    each.setAttribute('role', 'button')
+    each.setAttribute('title', hint)
+    each.textContent = label
+    each.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      BOARD.historyMonth = to
+      renderHistory()
+    })
+    return each
+  }
+  head.appendChild(step('\u2039', 'historyPrevMonth', addMonths(month, -1),
+    paletteText('boardHistoryMonthPrev'), month > floor))
+  var label = document.createElement('span')
+  Object.assign(label.style, BOARD_UI.historyCalMonth)
+  label.setAttribute('data-role', 'historyMonth')
+  label.textContent = historyMonthLabel(month)
+  head.appendChild(label)
+  head.appendChild(step('\u203a', 'historyNextMonth', addMonths(month, 1),
+    paletteText('boardHistoryMonthNext'), month < ceiling))
+  return head
+}
+
+/**
+ * One day in the calendar.
+ *
+ * A cell answers exactly one press: a day with a page opens it, and today
+ * goes back to today whatever it holds - the cell for today is the way home
+ * from inside the calendar, not a page of its own.
+ * @param {string} date - the day.
+ * @param {boolean} hasPage - whether a page is filed under it.
+ * @param {string} today - today, as a day.
+ * @param {string} viewing - the day the canvas is standing on, or ''.
+ * @returns {Element} the cell.
+ */
+function historyCalendarCell(date, hasPage, today, viewing) {
+  var isToday = date === today
+  var opens = hasPage || isToday
+  var cell = document.createElement('div')
+  Object.assign(cell.style, opens ? BOARD_UI.historyCalCell : BOARD_UI.historyCalCellOff)
+  if (viewing === date) Object.assign(cell.style, BOARD_UI.historyCalCellOn)
+  else if (isToday) Object.assign(cell.style, BOARD_UI.historyCalCellToday)
+  cell.setAttribute('data-role', 'historyDay')
+  cell.setAttribute('data-date', date)
+  if (hasPage) cell.setAttribute('data-history', 'true')
+  if (isToday) cell.setAttribute('data-today', 'true')
+  if (viewing === date) cell.setAttribute('data-viewing', 'true')
+  var number = document.createElement('span')
+  number.textContent = String(Number(date.slice(8, 10)))
+  cell.appendChild(number)
+  if (hasPage) {
+    var dot = document.createElement('span')
+    Object.assign(dot.style, BOARD_UI.historyCalDot)
+    dot.setAttribute('data-role', 'historyDot')
+    cell.appendChild(dot)
+  }
+  if (!opens) return cell
+  cell.setAttribute('role', 'button')
+  cell.setAttribute('title', isToday
+    ? paletteText('boardHistoryBackTodayHint')
+    : date + ' · ' + paletteText('boardHistoryViewing'))
+  cell.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (isToday) {
+      backToToday()
+      return
+    }
+    viewDay(date)
+  })
+  return cell
+}
+
+/**
+ * Stand the canvas on one past day.
+ *
+ * The paint is chosen by `BOARD.historyDate` alone, so this is the whole of
+ * the transition: the readers that would write are not consulted, because
+ * the paint that follows does not draw anything they could write to.
+ * @param {string} date - the day to show.
+ * @returns {boolean} whether the canvas moved onto it.
+ */
+function viewDay(date) {
+  if (!BOARD.open || !monthOf(date)) return false
+  // A field the reader is in is finished first: the paint that answers this
+  // press must not land under a caret, and what it says belongs to today.
+  boardSettleEdits()
+  boardCloseMenus()
+  BOARD.historyDate = date
+  BOARD.historyMonth = monthOf(date)
+  BOARD.historyArmed = ''
+  paintBoardActions()
+  repaint()
+  if (BOARD.historyNode) renderHistory()
+  return true
+}
+
+/**
+ * Put the canvas back on today.
+ *
+ * The way out of a page, and the press the bar and the calendar both offer:
+ * a history that could only be left by closing the board would make looking
+ * cost the place the reader was standing.
+ * @returns {boolean} whether the canvas was on a page.
+ */
+function backToToday() {
+  if (!BOARD.historyDate) return false
+  BOARD.historyDate = ''
+  BOARD.historyArmed = ''
+  removeHistoryBanner()
+  paintBoardActions()
+  // The page's panels are not today's measurements: clear the stage, so the
+  // paint that follows measures nothing that belongs to the day it left.
+  if (BOARD.stage) BOARD.stage.textContent = ''
+  if (BOARD.open) repaint()
+  if (BOARD.historyNode) renderHistory()
+  return true
+}
+
+/**
+ * Show the heading's working chips, or put them away.
+ *
+ * Every word in that row either writes or rearranges today. A page is read,
+ * so the row is taken down while one is up rather than left standing as a
+ * row of presses that would edit a day the reader is only looking at.
+ * @returns {void}
+ */
+function paintBoardActions() {
+  var chips = BOARD.actionChips || []
+  var hide = !!BOARD.historyDate
+  for (var i = 0; i < chips.length; i++) {
+    if (!chips[i]) continue
+    chips[i].style.display = hide ? 'none' : ''
+  }
+}
+
+/**
+ * Draw one past day on the canvas.
+ *
+ * Everything here comes out of the page: its goals and where they stood, the
+ * conversations in the order they were drawn, and the thoughts in the words
+ * they were written in. Nothing reads the live board and nothing writes it,
+ * which is what makes the page read-only in fact rather than by agreement:
+ * the nodes carry no handle, and there is no store behind them to write to.
+ * @returns {void}
+ */
+function paintHistoryPage() {
+  var date = BOARD.historyDate
+  if (!date || !BOARD.stage) return
+  BOARD.stage.textContent = ''
+  // The live canvas's bookkeeping is not this paint's: nothing to move,
+  // nothing to keep, nothing to tick, and no links to redraw.
+  BOARD.nodes = []
+  BOARD.looseNodes = Object.create(null)
+  BOARD.stacks = []
+  BOARD.dropZones = []
+  BOARD.lines = []
+  BOARD.noteEditor = null
+  BOARD.cardEditor = null
+  BOARD.clocks = []
+  BOARD.rows = []
+  BOARD.blocks = []
+  BOARD.inbox = []
+  BOARD.folders = Object.create(null)
+  BOARD.linkLayer = null
+  // The finished-cards list belongs to today's heading: a list of what is
+  // waiting to be dealt with cannot stand over a day that is over.
+  if (BOARD.doneBinPanel && BOARD.doneBinPanel.parentNode) {
+    BOARD.doneBinPanel.parentNode.removeChild(BOARD.doneBinPanel)
+  }
+  BOARD.doneBinPanel = null
+  BOARD.doneBinOpen = false
+  // The bar comes first, and stands on the page's paper rather than on the
+  // stage: the way back is not something that has to wait for a record.
+  paintHistoryBanner(date)
   HISTORY.day(date).then(function (record) {
-    if (!box.parentNode) return
-    box.textContent = ''
+    // The canvas may have moved to another day, or back to today, while the
+    // database was answering.
+    if (!BOARD.open || BOARD.historyDate !== date || !BOARD.stage) return
+    paintHistoryBanner(date)
+    BOARD.stage.textContent = ''
     if (!record || !record.view) {
-      box.appendChild(historyNote(paletteText('boardHistoryDayBroken')))
+      var broken = historyNote(paletteText('boardHistoryDayBroken'))
+      broken.style.position = 'absolute'
+      broken.style.left = BOARD_CANVAS_EDGE + 'px'
+      broken.style.top = BOARD_CANVAS_EDGE + 'px'
+      BOARD.stage.appendChild(broken)
+      BOARD.extent = { width: 720, height: 520 }
+      applyBoardZoom()
       return
     }
     var view = record.view
-    var meta = document.createElement('div')
-    Object.assign(meta.style, BOARD_UI.historyDayMeta)
-    meta.setAttribute('data-role', 'historyMeta')
-    meta.textContent = historyMeta(record)
-    box.appendChild(meta)
-    var goals = Array.isArray(view.goals) ? view.goals : []
-    var sessions = Array.isArray(view.sessions) ? view.sessions : []
-    for (var g = 0; g < goals.length; g++) {
-      var goal = goals[g] || {}
-      var one = document.createElement('div')
-      Object.assign(one.style, BOARD_UI.historyGoal)
-      var name = document.createElement('div')
-      Object.assign(name.style, BOARD_UI.historyGoalHead)
-      name.setAttribute('data-role', 'historyGoal')
-      name.textContent = goal.label || goal.key || paletteText('boardNewGoal')
-      one.appendChild(name)
-      if (goal.intent) {
-        var intent = document.createElement('div')
-        Object.assign(intent.style, BOARD_UI.historyGoalIntent)
-        intent.textContent = goal.intent
-        one.appendChild(intent)
-      }
-      for (var s = 0; s < sessions.length; s++) {
-        if (sessions[s].goal !== goal.key) continue
-        var line = document.createElement('div')
-        Object.assign(line.style, BOARD_UI.historyLine)
-        line.setAttribute('data-role', 'historySession')
-        line.textContent = sessions[s].title || sessions[s].id
-        if (sessions[s].status) {
-          var state = document.createElement('span')
-          Object.assign(state.style, BOARD_UI.historyStatus)
-          state.textContent = ' · ' + sessions[s].status
-          line.appendChild(state)
-        }
-        if (sessions[s].carriedDays > 0) {
-          var carried = document.createElement('span')
-          Object.assign(carried.style, BOARD_UI.historyStatus)
-          carried.textContent = ' · ' + paletteText('boardHistoryCarried')
-            + sessions[s].carriedDays + paletteText('boardHistoryCarriedUnit')
-          line.appendChild(carried)
-        }
-        one.appendChild(line)
-      }
-      box.appendChild(one)
+    var blocks = historyBlocks(view)
+    var places = historyPlaces(blocks)
+    var i
+    for (i = 0; i < blocks.length; i++) {
+      BOARD.stage.appendChild(buildHistoryBlock(blocks[i], places[blocks[i].key]))
     }
-    var cards = Array.isArray(view.cards) ? view.cards : []
-    for (var c = 0; c < cards.length; c++) {
-      if (!cards[c] || !cards[c].text) continue
-      var note = document.createElement('div')
-      Object.assign(note.style, BOARD_UI.historyLine)
-      note.setAttribute('data-role', 'historyCard')
-      note.textContent = (cards[c].done ? '✓ ' : '') + cards[c].text
-      box.appendChild(note)
+    var drawn = historyCardPlaces(Array.isArray(view.cards) ? view.cards : [], blocks)
+    var loose = []
+    for (i = 0; i < drawn.length; i++) {
+      loose.push(drawn[i].card)
+      BOARD.stage.appendChild(buildHistoryCard(drawn[i].card, drawn[i]))
     }
-    // The two presses a page offers. Restore is the copy; the backup is the
-    // way back from it, and is offered only once one exists.
-    var restore = document.createElement('span')
-    var armed = BOARD.historyArmed === date
-    Object.assign(restore.style, armed ? BOARD_UI.historyRestoreArmed : BOARD_UI.historyRestore)
-    restore.setAttribute('role', 'button')
-    restore.setAttribute('data-role', 'historyRestore')
-    if (armed) restore.setAttribute('data-armed', 'true')
-    restore.setAttribute('title', paletteText(armed ? 'boardHistoryRestoreArmed' : 'boardHistoryRestore'))
-    restore.textContent = paletteText(armed ? 'boardHistoryRestoreArmed' : 'boardHistoryRestore')
-    restore.addEventListener('click', function (ev) {
-      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-      if (BOARD.historyArmed !== date) {
-        BOARD.historyArmed = date
-        renderHistory()
+    if (!blocks.length && !drawn.length) {
+      var empty = document.createElement('div')
+      Object.assign(empty.style, BOARD_UI.emptyBoard)
+      empty.setAttribute('data-role', 'emptyBoard')
+      empty.textContent = paletteText('boardHistoryEmpty')
+      BOARD.stage.appendChild(empty)
+    }
+    var extent = boardExtent(places, boardPanelHeights(), boardPanelWidths(), loose)
+    BOARD.extent = extent
+    applyBoardZoom()
+    if (BOARD.count) BOARD.count.textContent = date + ' · ' + historyMeta(record)
+  })
+}
+
+/**
+ * A page's goals, with their conversations put back under them.
+ *
+ * The page keeps its sessions in draw order, so the order they are walked in
+ * here is the order they stood in: a panel reads across its conversations,
+ * and a branch stands beside the one it came from.
+ * @param {object} view - the page's frozen view.
+ * @returns {Array<object>} the blocks, in the order the page drew them.
+ */
+function historyBlocks(view) {
+  var goals = Array.isArray(view.goals) ? view.goals : []
+  var sessions = Array.isArray(view.sessions) ? view.sessions : []
+  var byKey = Object.create(null)
+  var blocks = []
+  for (var g = 0; g < goals.length; g++) {
+    var goal = goals[g] || {}
+    if (typeof goal.key !== 'string' || !goal.key) continue
+    var block = {
+      key: goal.key,
+      label: goal.label || goal.key,
+      intent: goal.intent || '',
+      kind: goal.kind || '',
+      hue: typeof goal.hue === 'number' ? goal.hue : null,
+      x: Math.max(0, Math.round(Number(goal.x) || 0)),
+      y: Math.max(0, Math.round(Number(goal.y) || 0)),
+      rows: [],
+    }
+    byKey[goal.key] = block
+    blocks.push(block)
+  }
+  for (var s = 0; s < sessions.length; s++) {
+    var row = sessions[s] || {}
+    var home = byKey[row.goal]
+    if (!home) continue
+    home.rows.push(row)
+  }
+  return blocks
+}
+
+/** Where each of a page's panels stood, keyed by block. */
+function historyPlaces(blocks) {
+  var places = Object.create(null)
+  for (var i = 0; i < blocks.length; i++) {
+    places[blocks[i].key] = { x: blocks[i].x, y: blocks[i].y }
+  }
+  return places
+}
+
+/**
+ * Where each of a page's thoughts stood, or where an older page's thoughts
+ * have to be laid out.
+ *
+ * A page filed before this build kept the words of its cards and not their
+ * places; those are set down beside the panels rather than dropped, because
+ * a thought is the last thing a history may lose.
+ * @param {Array<object>} cards - the page's cards.
+ * @param {Array<object>} blocks - the page's panels.
+ * @returns {Array<object>} `{card, x, y, height}` per card.
+ */
+function historyCardPlaces(cards, blocks) {
+  var out = []
+  var right = 0
+  for (var b = 0; b < blocks.length; b++) {
+    right = Math.max(right, blocks[b].x + boardBlockWidth(blocks[b]))
+  }
+  right = right ? right + BOARD_COLUMN_GAP : BOARD_CANVAS_EDGE
+  var fall = BOARD_CANVAS_EDGE
+  for (var i = 0; i < cards.length; i++) {
+    var card = cards[i] || {}
+    if (!card.text) continue
+    var box = boardCardBox(card.text, card.h)
+    var x = Number(card.x)
+    var y = Number(card.y)
+    var placed = isFinite(x) && isFinite(y) && (x > 0 || y > 0)
+    out.push({
+      card: card,
+      x: placed ? Math.max(0, Math.round(x)) : right,
+      y: placed ? Math.max(0, Math.round(y)) : fall,
+      height: box.height,
+    })
+    if (!placed) fall = fall + box.height + BOARD_COLUMN_GAP
+  }
+  return out
+}
+
+/**
+ * One panel of a page: the same box as today's, with nothing in it that can
+ * be pressed.
+ * @param {object} block - the goal as the page read it.
+ * @param {object} place - `{x, y}` on the paper.
+ * @returns {Element} the panel.
+ */
+function buildHistoryBlock(block, place) {
+  var node = document.createElement('div')
+  Object.assign(node.style, BOARD_UI.block)
+  node.style.left = place.x + 'px'
+  node.style.top = place.y + 'px'
+  node.style.width = boardBlockWidth(block) + 'px'
+  node.setAttribute('data-role', 'workspaceBlock')
+  node.setAttribute('data-block', block.key)
+  node.setAttribute('data-history', 'true')
+  if (block.hue !== null) {
+    node.style.background = solidPaper('hsl(' + block.hue + ' 55% 50% / 0.05)', BOARD_INK.column)
+    node.style.borderColor = 'hsl(' + block.hue + ' 42% 45% / 0.22)'
+  }
+  var head = document.createElement('div')
+  Object.assign(head.style, BOARD_UI.blockHead)
+  head.style.cursor = 'default'
+  head.setAttribute('data-role', 'blockHead')
+  var caret = document.createElement('span')
+  Object.assign(caret.style, BOARD_UI.blockCaret)
+  caret.textContent = '\u25be'
+  head.appendChild(caret)
+  var dot = document.createElement('span')
+  Object.assign(dot.style, BOARD_UI.blockDot)
+  dot.setAttribute('data-role', 'blockDot')
+  dot.style.background = block.hue === null ? BOARD_INK.dim : 'hsl(' + block.hue + ' 46% 56%)'
+  head.appendChild(dot)
+  var name = document.createElement('span')
+  Object.assign(name.style, BOARD_UI.blockName)
+  name.setAttribute('data-role', 'blockName')
+  name.textContent = block.label
+  head.appendChild(name)
+  var count = document.createElement('span')
+  Object.assign(count.style, BOARD_UI.blockCount)
+  count.setAttribute('data-role', 'blockCount')
+  count.textContent = String(block.rows.length)
+  head.appendChild(count)
+  node.appendChild(head)
+  if (block.intent) {
+    var intent = document.createElement('div')
+    Object.assign(intent.style, BOARD_UI.historyGoalIntent)
+    intent.style.padding = '6px 14px 0'
+    intent.textContent = block.intent
+    node.appendChild(intent)
+  }
+  var body = document.createElement('div')
+  Object.assign(body.style, BOARD_UI.historyBlockBody)
+  body.setAttribute('data-role', 'historyBlockBody')
+  body.style.width = (boardBlockWidth(block) - BOARD_BLOCK_PAD * 2) + 'px'
+  for (var r = 0; r < block.rows.length; r++) {
+    body.appendChild(buildHistoryRow(block.rows[r], block.hue))
+  }
+  node.appendChild(body)
+  return node
+}
+
+/**
+ * One conversation of a page: the name and the word it wore.
+ *
+ * It is not a way in. The page is a copy, and the conversation it names may
+ * have been deleted, archived or renamed since - a press that led there
+ * would be offering a door the page cannot promise.
+ * @param {object} session - the conversation as the page read it.
+ * @param {number|null} hue - the goal's colour that day.
+ * @returns {Element} the card.
+ */
+function buildHistoryRow(session, hue) {
+  var card = document.createElement('div')
+  Object.assign(card.style, BOARD_UI.card)
+  card.style.cursor = 'default'
+  if (hue !== null) {
+    card.style.background = solidPaper('hsl(' + hue + ' 48% 50% / 0.10)', BOARD_INK.card)
+    card.style.borderColor = 'hsl(' + hue + ' 40% 45% / 0.22)'
+    card.style.borderLeft = '3px solid hsl(' + hue + ' 55% 46% / 0.72)'
+  }
+  card.setAttribute('data-role', 'historySession')
+  if (session.id) card.setAttribute('data-session-id', session.id)
+  var title = document.createElement('div')
+  Object.assign(title.style, BOARD_UI.cardTitle)
+  title.setAttribute('data-role', 'cardTitle')
+  title.textContent = session.title || session.id || ''
+  card.appendChild(title)
+  if (!session.status && !(session.carriedDays > 0)) return card
+  var meta = document.createElement('div')
+  Object.assign(meta.style, BOARD_UI.cardMeta)
+  meta.setAttribute('data-role', 'historyMeta')
+  if (session.status) {
+    var chip = document.createElement('span')
+    Object.assign(chip.style, BOARD_UI.cardChip)
+    Object.assign(chip.style, historyChipStyle(session.statusKey))
+    chip.textContent = session.status
+    meta.appendChild(chip)
+  }
+  if (session.carriedDays > 0) {
+    var carried = document.createElement('span')
+    Object.assign(carried.style, BOARD_UI.cardCarried)
+    carried.textContent = paletteText('boardHistoryCarried')
+      + session.carriedDays + paletteText('boardHistoryCarriedUnit')
+    meta.appendChild(carried)
+  }
+  card.appendChild(meta)
+  return card
+}
+
+/** The chip a status word wore: the same three colours the live canvas uses. */
+function historyChipStyle(key) {
+  if (key === 'pending') return BOARD_UI.cardChipPending
+  if (key === 'running') return BOARD_UI.cardChipRunning
+  if (key === 'done') return BOARD_UI.cardChipDone
+  if (key === 'paused') return BOARD_UI.cardChipPaused
+  if (key === 'settled') return BOARD_UI.cardChipSettled
+  return BOARD_UI.cardChipFinished
+}
+
+/**
+ * One thought of a page: the words, on the paper they were written on.
+ * @param {object} card - the card as the page kept it.
+ * @param {object} place - `{x, y, height}` on the paper.
+ * @returns {Element} the note.
+ */
+function buildHistoryCard(card, place) {
+  var node = document.createElement('div')
+  Object.assign(node.style, BOARD_UI.loose)
+  node.style.left = place.x + 'px'
+  node.style.top = place.y + 'px'
+  node.style.width = BOARD_CARD_W + 'px'
+  node.style.height = place.height + 'px'
+  if (card.done) Object.assign(node.style, BOARD_UI.looseDone)
+  node.setAttribute('data-role', 'historyCard')
+  if (card.id) node.setAttribute('data-card-id', card.id)
+  if (card.done) node.setAttribute('data-done', 'true')
+  var text = document.createElement('div')
+  Object.assign(text.style, BOARD_UI.looseText)
+  text.textContent = (card.done ? '\u2713 ' : '') + String(card.text || '')
+  node.appendChild(text)
+  return node
+}
+
+/**
+ * The bar a page wears: the day, what it is, and the presses that belong to it.
+ *
+ * It stands on the board's paper rather than on the scaled stage, so a zoom
+ * does not take the way back with it. Restoring is the one write here, and it
+ * is armed first - the same two-press grammar the list used, kept because the
+ * press that copies a day into today is not one to make by accident.
+ * @param {string} date - the day on the canvas.
+ * @returns {void}
+ */
+function paintHistoryBanner(date) {
+  removeHistoryBanner()
+  if (!BOARD.panel) return
+  var bar = document.createElement('div')
+  Object.assign(bar.style, BOARD_UI.historyBanner)
+  bar.setAttribute('data-role', 'historyBanner')
+  // The bar is not the canvas: a press on it must not start a pan.
+  bar.addEventListener('pointerdown', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+  })
+  var when = document.createElement('span')
+  when.setAttribute('data-role', 'historyBannerDate')
+  when.textContent = date
+  bar.appendChild(when)
+  var mark = document.createElement('span')
+  Object.assign(mark.style, BOARD_UI.historyBannerMark)
+  mark.setAttribute('data-role', 'historyReadOnly')
+  mark.textContent = paletteText('boardHistoryViewing')
+  bar.appendChild(mark)
+
+  var back = document.createElement('span')
+  Object.assign(back.style, BOARD_UI.historyTool)
+  back.setAttribute('role', 'button')
+  back.setAttribute('data-role', 'historyBackToday')
+  back.setAttribute('title', paletteText('boardHistoryBackTodayHint'))
+  back.textContent = paletteText('boardHistoryBackToday')
+  back.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    backToToday()
+  })
+  bar.appendChild(back)
+
+  var armed = BOARD.historyArmed === date
+  var restore = document.createElement('span')
+  Object.assign(restore.style, armed ? BOARD_UI.historyRestoreArmed : BOARD_UI.historyTool)
+  restore.setAttribute('role', 'button')
+  restore.setAttribute('data-role', 'historyRestore')
+  if (armed) restore.setAttribute('data-armed', 'true')
+  restore.setAttribute('title', paletteText(armed ? 'boardHistoryRestoreArmed' : 'boardHistoryRestore'))
+  restore.textContent = paletteText(armed ? 'boardHistoryRestoreArmed' : 'boardHistoryRestore')
+  restore.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.historyArmed !== date) {
+      BOARD.historyArmed = date
+      paintHistoryBanner(date)
+      return
+    }
+    BOARD.historyArmed = ''
+    // The way out is taken first: what follows writes today, and today's
+    // paint is the one that should stand behind the word it says.
+    backToToday()
+    restoreDay(date).then(function (done) {
+      if (!done) {
+        showToast(paletteText('boardHistoryDayBroken'))
         return
       }
-      BOARD.historyArmed = ''
-      restoreDay(date).then(function (done) {
-        if (!done) {
-          showToast(paletteText('boardHistoryDayBroken'))
-          renderHistory()
-          return
-        }
-        showToast(paletteText('boardHistoryRestored') + date + paletteText('boardHistoryRestoredTail'))
-        closeBoardHistory()
-      })
-    })
-    box.appendChild(restore)
-    HISTORY.backup().then(function (boxed) {
-      if (!boxed || !boxed.snapshot || !box.parentNode) return
-      var back = document.createElement('span')
-      Object.assign(back.style, BOARD_UI.historyRestore)
-      back.setAttribute('role', 'button')
-      back.setAttribute('data-role', 'historyBefore')
-      back.setAttribute('title', paletteText('boardHistoryBeforeHint'))
-      back.textContent = paletteText('boardHistoryBefore')
-      back.addEventListener('click', function (ev) {
-        if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-        takeBeforeBackup().then(function (done) {
-          if (!done) return
-          showToast(paletteText('boardHistoryBeforeDone'))
-          closeBoardHistory()
-        })
-      })
-      box.appendChild(back)
+      showToast(paletteText('boardHistoryRestored') + date + paletteText('boardHistoryRestoredTail'))
+      if (BOARD.historyNode) renderHistory()
     })
   })
-  return box
+  bar.appendChild(restore)
+
+  HISTORY.backup().then(function (boxed) {
+    if (!boxed || !boxed.snapshot || !bar.parentNode) return
+    var before = document.createElement('span')
+    Object.assign(before.style, BOARD_UI.historyTool)
+    before.setAttribute('role', 'button')
+    before.setAttribute('data-role', 'historyBefore')
+    before.setAttribute('title', paletteText('boardHistoryBeforeHint'))
+    before.textContent = paletteText('boardHistoryBefore')
+    before.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      takeBeforeBackup().then(function (done) {
+        if (!done) return
+        showToast(paletteText('boardHistoryBeforeDone'))
+        backToToday()
+      })
+    })
+    bar.appendChild(before)
+  })
+
+  BOARD.historyBanner = bar
+  BOARD.panel.appendChild(bar)
+}
+
+/** Take a page's bar down. */
+function removeHistoryBanner() {
+  if (BOARD.historyBanner && BOARD.historyBanner.parentNode) {
+    BOARD.historyBanner.parentNode.removeChild(BOARD.historyBanner)
+  }
+  BOARD.historyBanner = null
 }
 
 /**
@@ -1143,4 +1654,4 @@ function importHistory(text) {
 
 
 
-export { closeBoardHistory, closeSeal, dropCarried, maybeShowSeal, noteMoment, openBoardHistory, pageDoc, pageView, restoreDay, settleDay, exportHistory, importHistory, keepBackup, takeBeforeBackup, pruneHistory, settleCarry, filePage }
+export { closeBoardHistory, closeSeal, dropCarried, maybeShowSeal, noteMoment, openBoardHistory, pageDoc, pageView, restoreDay, settleDay, exportHistory, importHistory, keepBackup, takeBeforeBackup, pruneHistory, settleCarry, filePage, paintHistoryPage, backToToday, viewDay }

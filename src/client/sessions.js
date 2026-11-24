@@ -196,9 +196,14 @@ function statusIsLive(status) {
  * reshuffles itself when you switch is a list whose positions cannot be
  * learned, and the position of the row you are in is exactly what
  * `hereIndex` reads instead of rewriting.
+ * @param {boolean} [keepBlank] - keep a conversation the host still calls
+ *   blank, one with no turn folded into it yet. The board asks for them: a
+ *   blank conversation is one nobody has said anything in, so the shell
+ *   hides it unless it is the one on screen, and a card on the board would
+ *   otherwise be the one door the board itself could not draw.
  * @returns {Array<object>} session summaries, newest first.
  */
-function conversationPool() {
+function conversationPool(keepBlank) {
   var services = taskServices()
   if (!services) return []
   var snapshot = services.list.getSnapshot()
@@ -226,7 +231,7 @@ function conversationPool() {
     var summary = byId[ids[i]]
     if (!summary) continue
     if (summary.origin === 'subagent') continue
-    if (summary.blank) continue
+    if (summary.blank && !keepBlank) continue
     if (archive && archive[summary.id]) continue
     pool.push(summary)
   }

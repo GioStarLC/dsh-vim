@@ -12,6 +12,7 @@ import { closePalette } from './task-window.js'
 import { armEntry, clearEntryArm } from './entry.js'
 import { state } from './scroll.js'
 import { serviceOf, taskServices, taskCtx } from './sessions.js'
+import { flushHandoff } from './board-view.js'
 
 /**
  * Switch the main view to one conversation.
@@ -38,6 +39,9 @@ function activateSession(id, opts) {
     console.error('[dsh-vim] could not open session', id, error)
     return false
   }
+  // A conversation that was handed cards while the board was up takes them
+  // now: its box mounts with it, and the flush waits for exactly that box.
+  flushHandoff(id)
   if (state.debug) console.log('[dsh-vim] opened session', id)
   return true
 }

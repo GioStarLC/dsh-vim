@@ -3,7 +3,7 @@
  * the page and overview surfaces, the drawn glyphs, and the one stylesheet
  * every window shares. Nothing here paints; the builders read these tokens.
  */
-import { BOARD_CARD_W } from './constants.js'
+import { BOARD_NOTE_INDENT, BOARD_CARD_W } from './constants.js'
 import { PALETTE_UI } from './task-window.js'
 
 /**
@@ -27,6 +27,16 @@ import { PALETTE_UI } from './task-window.js'
  */
 var BOARD_INK = {
   sheet: 'var(--dshv-board-sheet, #2f3644)',
+  /**
+   * The colour every solid surface is laid on.
+   *
+   * The canvas is made of washes - a goal's hue, the column's grey, the
+   * card's lighter grey, the note's amber - and a wash over nothing is a
+   * window: two panels standing on each other read through each other. This
+   * is what is underneath them all. The page coat names the host's own base
+   * colour, and the floating board falls back to its sheet.
+   */
+  base: 'var(--dshv-board-base, #2f3644)',
   sheetEdge: 'var(--dshv-board-edge, rgba(255, 255, 255, 0.16))',
   text: 'var(--dshv-board-text, #eef1f7)',
   dim: 'var(--dshv-board-dim, rgba(238, 241, 247, 0.45))',
@@ -75,10 +85,50 @@ var BOARD_INK = {
   dialogError: 'var(--dshv-board-dialog-error, hsl(6 78% 66%))',
 }
 
+/**
+ * The canvas's own chrome.
+ *
+ * A sheet you pan, not a list you read: everything is sized so a title is
+ * the thing the eye lands on, and the metadata under it stays legible
+ * without leaning in. One base size on the mount, everything inside in em.
+ */
+/**
+ * The paper a note is made of, wherever a note is drawn.
+ *
+ * The sheet on the canvas and the line in the tray differ in shape and in
+ * nothing else, so the material lives here once: both read these four
+ * properties, and neither can drift from the other while the shapes stay
+ * their own. Layout is the caller's and is deliberately not in here.
+ */
+/** A newline, spelled once so no editor or tool can double its escape. */
+/**
+ * A wash made solid: the tints, laid over the board's own base colour.
+ *
+ * Every surface on this canvas is a translucent tint - a goal's hue over
+ * the sheet, a card's grey over the panel, a note's amber over whatever is
+ * behind it. A tint over nothing is a window, which is why cards read
+ * through each other where they overlap. Wrapping each tint in a one-stop
+ * gradient and standing the base colour under all of them keeps exactly the
+ * colour the surface had, and makes it hide what is beneath.
+ * @param {...string} tints - the washes, outermost first.
+ * @returns {string} a `background` value that cannot see through.
+ */
+function solidPaper() {
+  var layers = []
+  for (var i = 0; i < arguments.length; i++) {
+    var tint = arguments[i]
+    if (!tint) continue
+    layers.push('linear-gradient(' + tint + ', ' + tint + ')')
+  }
+  layers.push(BOARD_INK.base)
+  return layers.join(', ')
+}
+
 var NOTE_PAPER = {
   // Opaque, and one shade: a card has to hide what is under it, or a pile on
-  // the canvas reads as two half-transparent sheets instead of a pile.
-  background: BOARD_INK.note,
+  // the canvas reads as two half-transparent sheets instead of a pile. The
+  // amber is itself a wash, so it is laid on the board's base colour.
+  background: solidPaper(BOARD_INK.note),
   border: '1px solid ' + BOARD_INK.noteEdge,
   borderLeft: '3px solid ' + BOARD_INK.noteSpine,
   boxShadow: '0 16px 30px -22px rgba(8, 12, 20, 0.6), 0 1px 2px rgba(8, 12, 20, 0.2)',
@@ -181,6 +231,79 @@ var BOARD_UI = {
     cursor: 'pointer',
     userSelect: 'none',
   },
+  /**
+   * The heading's settings sheet: the box that anchors it, the sheet, and
+   * its rows.
+   *
+   * The sheet hangs off the chip that opened it rather than off the window,
+   * so it reads as that chip's own and lands in the same place in both
+   * mounts - the floating board and the page.
+   */
+  settingsWrap: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  settingsSheet: {
+    position: 'absolute',
+    top: '100%',
+    right: '0',
+    marginTop: '6px',
+    zIndex: '40',
+    minWidth: '250px',
+    maxWidth: '330px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    padding: '8px',
+    borderRadius: '10px',
+    background: BOARD_INK.dialog,
+    border: '1px solid ' + BOARD_INK.dialogEdge,
+    boxShadow: '0 14px 28px -16px rgba(8, 12, 20, 0.55)',
+    textAlign: 'left',
+  },
+  settingsTitle: {
+    padding: '2px 6px 6px',
+    fontSize: '0.78em',
+    letterSpacing: '0.04em',
+    textTransform: 'uppercase',
+    color: BOARD_INK.dim,
+  },
+  settingsRow: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: '8px',
+    padding: '6px',
+    borderRadius: '7px',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  /** The box that fills when a switch is on: the same shape as a note's. */
+  settingsBox: {
+    flex: '0 0 auto',
+    boxSizing: 'border-box',
+    width: '17px',
+    height: '17px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: '1px',
+    borderRadius: '4px',
+    border: '1px solid ' + BOARD_INK.dialogEdge,
+    background: 'transparent',
+    color: 'transparent',
+    fontSize: '0.78em',
+    lineHeight: '1',
+  },
+  settingsBoxOn: {
+    borderColor: BOARD_INK.accent,
+    background: BOARD_INK.accent,
+    color: BOARD_INK.accentOn,
+  },
+  settingsLabel: { display: 'flex', flexDirection: 'column', gap: '2px', minWidth: '0' },
+  settingsName: { fontSize: '0.88em', color: BOARD_INK.dialogInk },
+  settingsHint: { fontSize: '0.76em', lineHeight: '1.45', color: BOARD_INK.dim },
+
   /**
    * The finished-cards bin: a chip in the heading, and the list it opens.
    *
@@ -306,9 +429,6 @@ var BOARD_UI = {
     cursor: 'pointer',
     userSelect: 'none',
   },
-  historyDayOpen: {
-    background: BOARD_INK.column,
-  },
   historyDayMain: {
     flex: '1 1 auto',
     minWidth: '0',
@@ -320,28 +440,6 @@ var BOARD_UI = {
     fontSize: '0.88em',
     lineHeight: '1.4',
     fontVariantNumeric: 'tabular-nums',
-  },
-  historyDayMeta: {
-    fontSize: '0.76em',
-    lineHeight: '1.4',
-    color: BOARD_INK.dim,
-  },
-  historyDetail: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '5px',
-    padding: '6px 8px 8px 10px',
-    borderTop: '1px solid ' + BOARD_INK.noteEdge,
-  },
-  historyGoal: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '1px',
-  },
-  historyGoalHead: {
-    fontSize: '0.8em',
-    lineHeight: '1.4',
-    color: BOARD_INK.text,
   },
   historyGoalIntent: {
     fontSize: '0.76em',
@@ -357,10 +455,6 @@ var BOARD_UI = {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     paddingLeft: '10px',
-  },
-  historyStatus: {
-    color: BOARD_INK.dim,
-    fontSize: '0.92em',
   },
   /**
    * The day's summary: a page on top of the desk, not a panel beside it.
@@ -456,6 +550,148 @@ var BOARD_UI = {
     color: BOARD_INK.accentOn,
     background: BOARD_INK.accent,
   },
+  /**
+   * The calendar: the history's way in.
+   *
+   * A page is asked for by its day, so the panel is a month rather than a
+   * list of every day the board was ever drawn on: a day with a page wears
+   * a dot, and a press on it drops the canvas onto that page. Same paper as
+   * the list it replaced, because it is the same kind of thing - a record
+   * that is read rather than worked on.
+   */
+  historyCalendar: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '2px 2px 6px',
+  },
+  historyCalHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: '6px',
+    padding: '0 2px 4px',
+    fontSize: '0.86em',
+    color: BOARD_INK.text,
+    userSelect: 'none',
+  },
+  historyCalNav: {
+    width: '22px',
+    textAlign: 'center',
+    padding: '1px 0',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    color: BOARD_INK.text,
+  },
+  historyCalNavOff: {
+    width: '22px',
+    textAlign: 'center',
+    padding: '1px 0',
+    borderRadius: '6px',
+    color: BOARD_INK.dim,
+    opacity: '0.35',
+  },
+  historyCalMonth: {
+    flex: '1 1 auto',
+    textAlign: 'center',
+    fontSize: '0.92em',
+    fontVariantNumeric: 'tabular-nums',
+  },
+  historyCalWeek: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: '2px',
+    padding: '0 2px 2px',
+    fontSize: '0.72em',
+    color: BOARD_INK.dim,
+    userSelect: 'none',
+  },
+  historyCalWeekday: { textAlign: 'center' },
+  historyCalGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(7, 1fr)',
+    gap: '2px',
+    padding: '0 2px',
+  },
+  /** One day that has a page under it: the calendar's only kind of press. */
+  historyCalCell: {
+    position: 'relative',
+    height: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '7px',
+    fontSize: '0.82em',
+    fontVariantNumeric: 'tabular-nums',
+    color: BOARD_INK.text,
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  /** A day with nothing filed under it: still legible, not a press. */
+  historyCalCellOff: {
+    position: 'relative',
+    height: '28px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '7px',
+    fontSize: '0.82em',
+    fontVariantNumeric: 'tabular-nums',
+    color: BOARD_INK.dim,
+    opacity: '0.45',
+    userSelect: 'none',
+  },
+  historyCalCellToday: { boxShadow: 'inset 0 0 0 1px ' + BOARD_INK.line },
+  historyCalCellOn: { background: BOARD_INK.accent, color: BOARD_INK.accentOn },
+  historyCalBlank: { height: '28px' },
+  /** The dot: this day has a page. */
+  historyCalDot: {
+    position: 'absolute',
+    bottom: '3px',
+    left: '50%',
+    marginLeft: '-2px',
+    width: '4px',
+    height: '4px',
+    borderRadius: '999px',
+    background: BOARD_INK.accent,
+  },
+  /**
+   * The bar a page wears: which day this is, and the presses it offers.
+   *
+   * It stands on the board's own paper rather than on the scaled stage, so
+   * zooming the canvas does not take the way back with it.
+   */
+  historyBanner: {
+    position: 'absolute',
+    left: '14px',
+    top: '52px',
+    zIndex: '58',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '5px 10px',
+    borderRadius: '999px',
+    background: BOARD_INK.note,
+    border: '1px solid ' + BOARD_INK.noteEdge,
+    borderLeft: '3px solid ' + BOARD_INK.noteSpine,
+    fontSize: '0.8em',
+    color: BOARD_INK.text,
+    userSelect: 'none',
+  },
+  historyBannerMark: {
+    padding: '1px 7px',
+    borderRadius: '999px',
+    background: BOARD_INK.column,
+    color: BOARD_INK.dim,
+    fontSize: '0.9em',
+  },
+  /** A page's panels: the same boxes, with the thoughts laid out inside. */
+  historyBlockBody: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '12px',
+    padding: '10px 12px 12px',
+  },
   /** A carried card's age: quiet, and never wider than the state chip. */
   cardCarried: {
     flex: '0 0 auto',
@@ -510,7 +746,7 @@ var BOARD_UI = {
     display: 'flex',
     flexDirection: 'column',
     boxSizing: 'border-box',
-    background: BOARD_INK.column,
+    background: solidPaper(BOARD_INK.column),
     border: '1px solid ' + BOARD_INK.columnEdge,
     borderRadius: '15px',
     boxShadow: '0 24px 60px -42px rgba(24, 18, 6, 0.5), 0 1px 3px rgba(24, 18, 6, 0.06)',
@@ -1272,6 +1508,10 @@ var BOARD_UI = {
     display: 'flex',
     flexDirection: 'column',
     gap: '6px',
+    // The thoughts stand under the conversation, stepped in from its left
+    // edge: the column then reads as one piece of work with what was
+    // written about it underneath, rather than as a row of equal cards.
+    marginLeft: BOARD_NOTE_INDENT + 'px',
     borderRadius: '10px',
     minHeight: '8px',
     transition: 'background-color .12s ease, box-shadow .12s ease',
@@ -1306,7 +1546,7 @@ var BOARD_UI = {
     boxSizing: 'border-box',
     padding: '11px 12px',
     borderRadius: '10px',
-    background: BOARD_INK.card,
+    background: solidPaper(BOARD_INK.card),
     border: '1px solid ' + BOARD_INK.cardEdge,
     // The card is a way in, so the pointer says so. Carrying it still works
     // from anywhere on it - the press and the first four pixels decide
@@ -1321,6 +1561,41 @@ var BOARD_UI = {
     alignItems: 'flex-start',
     gap: '6px',
     minWidth: '0',
+  },
+  /**
+   * The rail: every mark the card carries, on its right edge.
+   *
+   * Three rows of two seats, always six of them. The title and the line
+   * under it own the left of the card, and the marks are a column of their
+   * own on the right - the eye reads the work first and the verbs second,
+   * and a mark never moves to a different place from one card to the next
+   * because the grid holds the seat whether or not it holds a mark.
+   */
+  cardRail: {
+    flex: '0 0 auto',
+    display: 'grid',
+    gridTemplateColumns: '18px 18px',
+    gridAutoRows: '18px',
+    gap: '6px 8px',
+    alignContent: 'center',
+    justifyItems: 'center',
+    alignItems: 'center',
+    marginLeft: '8px',
+  },
+  /** One seat of that rail, with a mark in it. */
+  cardSlot: {
+    width: '18px',
+    height: '18px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  /** An empty seat: it keeps the grid's shape and takes no press. */
+  cardSlotOff: {
+    width: '18px',
+    height: '18px',
+    display: 'flex',
+    pointerEvents: 'none',
   },
   cardLock: {
     flex: '0 0 auto',
@@ -1365,19 +1640,39 @@ var BOARD_UI = {
   },
   cardTitle: {
     display: '-webkit-box',
-    WebkitLineClamp: '2',
+    WebkitLineClamp: '1',
     WebkitBoxOrient: 'vertical',
     overflow: 'hidden',
     fontSize: '1em',
-    // Two lines is the title's seat, not its cap: a one-line name keeps the
-    // second line empty so every card in a row is the same height, and the
-    // two-line ones are not taller than their neighbours either.
-    minHeight: '2.8em',
+    // One line is the name's whole seat. The second line the card used to
+    // keep empty now holds what the conversation was last told (see
+    // `cardSaid`), so a card is the same height it always was.
+    minHeight: '1.4em',
     // A note's own title is 600 at 0.95em; the card keeps the weight and
     // the larger size, because the card is the work and the paper is what
     // was said about it. The eye lands on the work first.
     fontWeight: '600',
     lineHeight: '1.4',
+  },
+  /**
+   * What the conversation was last given, in the reader's own words: one
+   * line, under the name.
+   *
+   * A fact about the work rather than about its state, so it keeps a line
+   * of its own: sharing the chip's row leaves about eight characters at
+   * this width, which reads worse than saying nothing. Its height is the
+   * line the name used to reserve and leave empty, so the card does not
+   * grow.
+   */
+  cardSaid: {
+    minHeight: '1.75em',
+    fontSize: '0.8em',
+    lineHeight: '1.4',
+    color: BOARD_INK.text,
+    opacity: '0.55',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
   /**
    * The line pinned to a card's conversation.
@@ -1453,15 +1748,6 @@ var BOARD_UI = {
    * parent's opacity would wash the chip's colour out with everything else.
    */
   cardMetaDim: { opacity: '0.5', flex: '0 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' },
-  /**
-   * The count and the marks, right after the state they belong to.
-   *
-   * They used to sit at the far end of the line, which put them under the
-   * band a carried note opens on the card's right side - the one place a
-   * hand is aiming at. Read left to right, the state and its marks are one
-   * sentence; nothing on this line needs the far edge.
-   */
-  cardTail: { display: 'flex', alignItems: 'center', gap: '8px', flex: '0 0 auto' },
   /**
    * The status chip, leading the meta line.
    *
@@ -1607,7 +1893,7 @@ var BOARD_UI = {
     zIndex: '40',
     boxSizing: 'border-box',
     borderRadius: '11px',
-    opacity: '0.96',
+    opacity: '1',
     transform: 'rotate(-0.4deg)',
     boxShadow: '0 22px 44px -20px rgba(12, 16, 24, 0.62)',
     pointerEvents: 'none',
@@ -1708,15 +1994,6 @@ var BOARD_UI = {
     color: BOARD_INK.dim,
     cursor: 'pointer',
   },
-  /** The × that takes a card off the board. Quiet, and never the whole card. */
-  cardRemove: {
-    flex: '0 0 auto',
-    padding: '0 2px',
-    fontSize: '1.1em',
-    lineHeight: '1.2',
-    color: BOARD_INK.dim,
-    cursor: 'pointer',
-  },
   /**
    * One loose card: a note on paper, pinned where the reader put it.
    *
@@ -1765,12 +2042,52 @@ var BOARD_UI = {
    */
 
   trayCard: {
-    background: BOARD_INK.note,
+    background: solidPaper(BOARD_INK.note),
     borderColor: BOARD_INK.noteEdge,
     // The spine is half of what makes a note look like a note: without it the
     // paper alone reads as a faint tint next to a neutral card.
     borderLeft: '3px solid ' + BOARD_INK.noteSpine,
   },
+  /**
+   * The lane at the foot of a goal: what the reader themselves did about it.
+   *
+   * The board is mostly the agents' work, and the reader's own half of a
+   * goal is the one thing it had nowhere to put. This row is that place: a
+   * note dragged here is kept as a line under the goal, in the same paper
+   * the inbox has always used - the tray, one per goal, which is what let
+   * the inbox stop being a kind of card of its own.
+   */
+  lane: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+    padding: '8px 12px 10px',
+    borderTop: '1px solid ' + BOARD_INK.line,
+  },
+  laneEmpty: {
+    padding: '2px',
+    fontSize: '0.82em',
+    color: BOARD_INK.dim,
+    opacity: '0.75',
+  },
+  /**
+   * A thought filed under a conversation, read the way the inbox reads one.
+   *
+   * A card on the paper is a piece of paper; a card that has been filed is a
+   * line of a list, and both places it can be filed - a goal's lane and a
+   * conversation's column - draw that line the same way, so filing a thought
+   * reads as one change of state rather than two. What it keeps is its own
+   * paper colour and its own marks: the hue says which goal it belongs to,
+   * and the marks are what can be done with it from here.
+   */
+  stackedNote: {
+    padding: '4px 6px 4px 10px',
+    minHeight: '30px',
+    borderRadius: '8px',
+    gap: '6px',
+  },
+  stackedHead: { alignItems: 'center', gap: '6px' },
+  stackedTitle: { fontSize: '0.86em', fontWeight: '400', lineHeight: '1.5' },
   /** One put-away note: a line, not a piece of paper. */
   trayRow: {
     display: 'flex',
@@ -1929,6 +2246,28 @@ var BOARD_UI = {
     userSelect: 'none',
   },
 
+
+  /**
+   * The pin on a thought: a lock that keeps a tidy from moving the card.
+   *
+   * Drawn in the paper's own ink and quiet until it is on, like every other
+   * mark on this card: a lock nobody set is a fact about nothing.
+   */
+  looseLock: {
+    flex: '0 0 auto',
+    boxSizing: 'border-box',
+    width: '20px',
+    height: '20px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: '999px',
+    color: 'inherit',
+    opacity: '0.42',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  looseLockOn: { opacity: '0.95' },
   /** Cutting the tie: a mark the size of the × beside it, drawn not spelled. */
   looseUnlink: {
     flex: '0 0 auto',
@@ -1990,7 +2329,7 @@ var BOARD_UI = {
     flexDirection: 'column',
     padding: '4px',
     borderRadius: '9px',
-    background: BOARD_INK.note,
+    background: solidPaper(BOARD_INK.note),
     border: '1px solid ' + BOARD_INK.noteEdge,
     boxShadow: '0 14px 28px -16px rgba(20, 14, 4, 0.6)',
   },
@@ -2334,6 +2673,7 @@ function applyBoardPageInk(root) {
     '--dshv-board-line': 'var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.22))',
     '--dshv-board-accent-on': 'var(--dsw-alias-label-on-color, #ffffff)',
     '--dshv-board-sheet': 'transparent',
+    '--dshv-board-base': 'var(--dsw-alias-bg-base, #2f3644)',
     '--dshv-board-edge': 'var(--dsw-alias-border-l1, rgba(127, 127, 127, 0.22))',
     '--dshv-board-text': 'var(--dsw-alias-label-primary, inherit)',
     '--dshv-board-dim': 'var(--dsw-alias-label-tertiary, rgba(127, 127, 127, 0.7))',
@@ -2663,12 +3003,14 @@ function installBoardCSS() {
 
     // The tray's rows: a list that answers the pointer, and a done line that
     // stays readable.
-    '.dshv-tray-row:hover{background:var(--dshv-board-note-hover,rgba(250,204,21,.14));}',
+    // A row is a strip of the note's paper, so its hover and its field are
+    // solid too: a tint over the tray would read the lines underneath.
+    '.dshv-tray-row:hover{background:linear-gradient(var(--dshv-board-note-hover,rgba(250,204,21,.14)),var(--dshv-board-note-hover,rgba(250,204,21,.14))),var(--dshv-board-base,#2f3644);}',
     // The prompt in a new card is a place, not a label: it has to be lighter
     // than the words that will replace it.
     '[data-role="cardTitleInput"]::placeholder{color:currentColor;opacity:.3;}',
     '.dshv-done-row:hover{transform:translateY(-1px);}',
-    '.dshv-tray-row[data-editing="true"]{background:var(--dshv-board-accent-soft,rgba(147,197,253,.10));}',
+    '.dshv-tray-row[data-editing="true"]{background:linear-gradient(var(--dshv-board-accent-soft,rgba(147,197,253,.10)),var(--dshv-board-accent-soft,rgba(147,197,253,.10))),var(--dshv-board-base,#2f3644);}',
     '.dshv-tray-row[data-done="true"] [data-role="inboxNoteText"]{text-decoration:line-through;text-decoration-color:rgba(234,179,8,.5);opacity:.55;}',
     '.dshv-tray-row .dshv-note-actions{margin-left:0;}',
     // A card that holds more than it can show ends in a fade, not a scrollbar.
@@ -2684,5 +3026,4 @@ function installBoardCSS() {
   }
 }
 
-
-export { BOARD_INK, NOTE_PAPER, BOARD_UI, BOARD_PAGE_UI, OVERVIEW_UI, BOARD_ICONS, boardIcon, installBoardCSS, applyBoardPageInk }
+export { BOARD_INK, NOTE_PAPER, BOARD_UI, BOARD_PAGE_UI, OVERVIEW_UI, BOARD_ICONS, boardIcon, installBoardCSS, applyBoardPageInk, solidPaper }

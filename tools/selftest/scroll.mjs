@@ -1,9 +1,7 @@
-/**
- * Behaviour checks: feel, guards, targeting, and the mode keys.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
-import { armDoubleEnter, renderSendHint, sendHintText } from './helpers.mjs'
+import { now, frames, clock, el, transcript, sidebar, composer, button, body, editor, modalEditor, editorBlurs, synthKeys, fire, shellFocus, press, stored, fakeWindow, menu, fakeDocument, aimAt, ReactStub, settingsElements, ctx, keydown, keyup, wheel, movePointer, blurWindow, tap, reset, check, step, setMediaReduce, setMenuOnScreen } from './harness.mjs'
+import { armDoubleEnter, renderSendHint, sendHintText, renderComposerTitle, recordTyping } from './helpers.mjs'
+
 check('a press does not teleport: it glides to the target', () => {
   tap('d')
   assert.equal(transcript.scrollTop, 0, 'nothing may move synchronously')
@@ -67,8 +65,6 @@ check('scrolling stops after release and stays stopped', () => {
   assert.ok(moving > 0)
 })
 
-// --- guards ----------------------------------------------------------------
-
 check('typing d in the composer is untouched', () => {
   transcript.scrollTop = 500
   const prevented = keydown('d', { target: composer })
@@ -101,8 +97,6 @@ check('unbound keys are ignored', () => {
   clock.advance(500)
   assert.equal(transcript.scrollTop, 0)
 })
-
-// --- what Enter does in the message box ------------------------------------
 
 check('by default Enter in the message box is left to the host', () => {
   assert.equal(fakeWindow.__dshVim.settings().sendMode, 'host', 'the shipped default must not change sending')
@@ -152,9 +146,6 @@ check('Shift+Enter is still the host line break, untouched', () => {
   assert.deepEqual(synthKeys, [])
   fakeWindow.__dshVim.update({ sendMode: 'host' })
 })
-
-// --- the double-Enter send mode --------------------------------------------
-
 
 check('the first Enter of a pair breaks the line and sends nothing', () => {
   armDoubleEnter()
@@ -410,7 +401,70 @@ check('the mode is offered on the settings page and follows the stored value', (
   fakeWindow.__dshVim.update({ sendMode: 'host' })
 })
 
+check('the title field stands in the input bar, not under the box', () => {
+  const field = renderComposerTitle()
+  assert.ok(field, 'a title field must be up')
+  assert.equal(field.type, 'input', 'a plain field, so the shell\'s own typing rules apply')
+  assert.equal(field.props['data-role'], 'composerTitle')
+  assert.ok(String(field.props.placeholder).length > 0, 'and it says what it is for')
+  assert.equal(field.props.style.position, undefined, 'the host row places it, not this plugin')
+  assert.equal(
+    (ctx.log.slots['conversation.composer.dock'] ?? []).length,
+    1,
+    'while the dock keeps its single entry: the send hint'
+  )
+})
 
+check('Enter in the title field puts the line at the top of the message box', () => {
+  // A press in the box is the gesture that lets a focus land there untouched;
+  // then the field's own Enter is the one that has to be taken.
+  fire('pointerdown', { type: 'pointerdown', target: editor })
+  shellFocus(editor)
+  const resumed = fakeDocument.execCommand
+  const typing = recordTyping()
+  const field = renderComposerTitle()
+  const input = el({ tag: 'INPUT', value: '先把标题写上' })
+  const ev = {
+    key: 'Enter',
+    target: input,
+    prevented: 0,
+    stopped: 0,
+    preventDefault() {
+      this.prevented += 1
+    },
+    stopPropagation() {
+      this.stopped += 1
+    },
+  }
+  field.props.onKeyDown(ev)
+  fakeDocument.execCommand = resumed
+  assert.equal(ev.prevented, 1, 'Enter belongs to the field, not to a send')
+  assert.equal(ev.stopped, 1, 'and it must not reach the shell')
+  assert.deepEqual(
+    typing.commands,
+    ['insertText', 'insertParagraph', 'insertParagraph'],
+    'the title, then the blank line under it'
+  )
+  assert.equal(
+    typing.text(),
+    '先把标题写上' + String.fromCharCode(10, 10),
+    'the line and the blank line that follows it'
+  )
+  assert.equal(input.value, '', 'the field is cleared once the box took the words')
+})
+
+check('a blank title writes nothing, and Escape clears the field', () => {
+  const field = renderComposerTitle()
+  const resumed = fakeDocument.execCommand
+  const typing = recordTyping()
+  const blank = el({ tag: 'INPUT', value: '   ' })
+  field.props.onKeyDown({ key: 'Enter', target: blank, preventDefault() {}, stopPropagation() {} })
+  fakeDocument.execCommand = resumed
+  assert.equal(typing.commands.length, 0, 'a blank line is not a title')
+  const filled = el({ tag: 'INPUT', value: '写了一半' })
+  field.props.onKeyDown({ key: 'Escape', target: filled, preventDefault() {}, stopPropagation() {} })
+  assert.equal(filled.value, '', 'Escape leaves the field empty')
+})
 
 check('no send hint while Enter still sends', () => {
   // The hint names a key the user does not have to think about, so a mode that
@@ -570,4 +624,127 @@ check('pressing d at the bottom does nothing and is not swallowed', () => {
   assert.equal(prevented, false)
 })
 
+check('focus inside a non-editable pane wins over the centre heuristic', () => {
+  fakeDocument.activeElement = sidebar
+  tap('d')
+  clock.advance(500)
+  assert.equal(sidebar.scrollTop, 140, 'the focused pane scrolls')
+  assert.equal(transcript.scrollTop, 0, 'the transcript stays put')
+})
 
+check('the pane under the pointer is the pane that scrolls', () => {
+  movePointer(120, 300)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'hovering the sidebar scrolls the sidebar')
+  assert.equal(transcript.scrollTop, 0, 'the conversation stays put')
+})
+
+check('the pane under the pointer outranks focus', () => {
+  // Focus sits on a toolbar button inside the transcript, which is what the
+  // focus rule would pick; the pointer decides instead.
+  fakeDocument.activeElement = button
+  movePointer(120, 300)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'the pointed-at pane must win')
+  assert.equal(transcript.scrollTop, 0, 'the focused pane must not move')
+})
+
+check('moving the pointer hands the next press to the other pane', () => {
+  movePointer(120, 300)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'the sidebar scrolls while it is pointed at')
+  movePointer(700, 400)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'the pane the pointer left must not move again')
+  assert.equal(transcript.scrollTop, 140, 'the conversation takes the next press')
+})
+
+check('moving the pointer mid-hold hands the rest of the burst over', () => {
+  movePointer(120, 300)
+  keydown('d')
+  clock.advance(200)
+  assert.ok(sidebar.scrollTop > 0, 'the burst starts on the pane being pointed at')
+  movePointer(700, 400)
+  clock.advance(200)
+  const settled = sidebar.scrollTop
+  clock.advance(600)
+  keyup()
+  clock.advance(1500)
+  assert.ok(transcript.scrollTop > 0, 'the rest of the burst goes where the pointer went')
+  assert.equal(sidebar.scrollTop, settled, 'the pane the pointer left must stop where it was')
+})
+
+check('a pointer resting where nothing can scroll falls back to the conversation', () => {
+  // The gap between panes, a pane header, a fan-out with nothing to scroll:
+  // the pointer rule finds no container there, so the centre rule answers.
+  aimAt(body)
+  movePointer(20, 20)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(transcript.scrollTop, 140, 'the conversation is still what scrolls')
+})
+
+check('losing the window forgets the pointer, and the centre decides again', () => {
+  movePointer(120, 120)
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'the point decides while it is fresh')
+  blurWindow()
+  tap('d')
+  clock.advance(1000)
+  assert.equal(sidebar.scrollTop, 140, 'a point kept across a blur must not be reused')
+  assert.equal(transcript.scrollTop, 140, 'the centre of the window decides again')
+})
+
+check('a focused control inside a pane scrolls that pane', () => {
+  fakeDocument.activeElement = button
+  tap('d')
+  clock.advance(500)
+  assert.equal(transcript.scrollTop, 140)
+})
+
+check('a pane at the end of its range hands the step to its parent', () => {
+  const outer = el({ className: 'outer', overflowY: 'auto', scrollHeight: 4000, clientHeight: 500 })
+  const inner = el({
+    className: 'inner',
+    overflowY: 'auto',
+    scrollHeight: 1500,
+    clientHeight: 500,
+    scrollTop: 1000,
+    parent: outer,
+  })
+  aimAt(inner)
+  tap('d')
+  clock.advance(500)
+  assert.equal(inner.scrollTop, 1000, 'the exhausted pane must not move')
+  assert.equal(outer.scrollTop, 140, 'the parent pane takes the delta')
+})
+
+check('wheel input takes over and cancels our animation', () => {
+  tap('d')
+  clock.advance(32)
+  const midway = transcript.scrollTop
+  assert.ok(midway > 0 && midway < 140, 'sanity: caught mid-glide')
+  wheel()
+  clock.advance(1000)
+  assert.equal(transcript.scrollTop, midway, 'our glide must stop where the user took over')
+})
+
+check('reduce-motion users get an instant jump', () => {
+  setMediaReduce(true)
+  tap('d')
+  assert.equal(transcript.scrollTop, 140, 'no animation when the OS asks for less motion')
+})
+
+check('a container styled scroll-behavior: smooth does not fight the engine', () => {
+  transcript.__scrollBehavior = 'smooth'
+  tap('d')
+  clock.advance(1000)
+  assert.equal(transcript.scrollTop, 140)
+  assert.equal(transcript.style.scrollBehavior, '', 'the inline override must be restored')
+  transcript.__scrollBehavior = 'auto'
+})

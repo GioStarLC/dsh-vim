@@ -58,6 +58,8 @@ var BOARD = {
    * keep the elements it aims at alive for the click that follows it.
    */
   paintOwed: false,
+  /** The frame that repaints the cards once their words land, or 0. */
+  saidPaint: 0,
   /** The conversation whose name is being edited from its card, and its field. */
   renamingCard: '',
   renameCardInput: null,
@@ -161,6 +163,10 @@ var BOARD = {
   sessionMenu: '',
   /** The ⋯ that opened it, so closing can take the mark's own state down. */
   sessionMenuMark: null,
+  /** Whether the heading's settings sheet is up, and what holds it. */
+  settingsMenu: false,
+  settingsMark: null,
+  settingsSheet: null,
   /** The conversations whose finished thoughts are unfolded, one by one. */
   doneExpanded: Object.create(null),
   /**
@@ -239,6 +245,26 @@ var BOARD = {
   dragged: false,
   /** Whether the canvas is showing only what is marked. */
   onlyStarred: false,
+  /**
+   * The day the canvas is standing on, or '' for today.
+   *
+   * This one field is the whole of the history's mode: while it holds a day
+   * the canvas draws that page and nothing else. The paint it selects reads
+   * a frozen page and no live store, and the nodes it builds carry no
+   * handles - so "read only" is a property of the paint rather than a rule
+   * every press has to remember to obey.
+   */
+  historyDate: '',
+  /** The month the calendar is standing on, as `YYYY-MM`, or '' for this one. */
+  historyMonth: '',
+  /** How many days the search above the calendar looked through, for its own line. */
+  historySearched: 0,
+  /** The chip that says a page is a copy which has already been armed. */
+  historyArmed: '',
+  /** The bar a page wears, while one is up. */
+  historyBanner: null,
+  /** The heading's working chips, put away while a page is being read. */
+  actionChips: [],
   /**
    * Whether the finished-cards list is open under its chip, and the chip's
    * own count readout.

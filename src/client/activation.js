@@ -13,7 +13,7 @@ import { closeBoard, mountBoardInto, openBoard, unmountBoard } from './board-mou
 import { commitBoardNote, noteCardFinished, pinToBoard, watchForks } from './board-notes.js'
 import { boardPointerDown, drawCardLinks } from './board-gestures.js'
 import { paintNewSessionModel } from './board-sheet.js'
-import { setHistoryRepaint, closeBoardHistory, openBoardHistory, dropCarried, restoreDay } from './board-history.js'
+import { setHistoryRepaint, closeBoardHistory, openBoardHistory, dropCarried, restoreDay, viewDay, backToToday } from './board-history.js'
 import { wireBoardHooks } from './board-hooks.js'
 import { BOARD } from './board-state.js'
 import { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, JOURNAL } from './board-stores.js'
@@ -23,7 +23,7 @@ import { catalogGroups, modelDirectories, offeredModels, modelEntries } from './
 import { PALETTE, setBoardOpenProbe, setSessionOpener, setPinAction, closePalette, cyclePhase, openPalette, paletteHeadline, refreshPalette, renderPalette, stopClock } from './task-window.js'
 import { PHASES_MODEL } from './phases.js'
 import { watchEntries, stopEntries } from './entry.js'
-import { turnsOf } from './turns.js'
+import { setSaidRepaint, turnsOf } from './turns.js'
 import { setDeliveryHook, watchRuns, loadRunStamps, forgetRuns, runSince } from './runs.js'
 import { setTaskContext, taskServices, statusOf, statusIsLive } from './sessions.js'
 import { hideToast } from './toast.js'
@@ -347,6 +347,23 @@ function makeApi() {
     },
 
     /**
+     * Stand the canvas on one past day, read-only.
+     *
+     * The same transition a press on a calendar cell makes, so a check can
+     * walk into a page without hunting for the cell that stands for it.
+     * @param {string} date - the day to show, `YYYY-MM-DD`.
+     * @returns {boolean} whether the canvas moved onto it.
+     */
+    historyView: function (date) {
+      return viewDay(date)
+    },
+
+    /** Step back out of a page, exactly as the bar's own press does. */
+    historyToday: function () {
+      return backToToday()
+    },
+
+    /**
      * Read, mark, cycle and forget stages.
      *
      * `phase()` returns the whole map; `phase(id)` reads one conversation;
@@ -394,6 +411,7 @@ function apply(ctx) {
   setSessionOpener(activateSession)
   setPinAction(pinToBoard)
   // The history reads and writes days; the canvas is what redraws after.
+  setSaidRepaint(renderBoard)
   setHistoryRepaint(function () {
     renderBoard()
   })

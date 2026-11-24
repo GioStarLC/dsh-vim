@@ -1,22 +1,6 @@
-/**
- * Behaviour checks: the model picker.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
+import { now, transcript, composer, body, editor, flush, press, stored, fakeWindow, cardNode, settingsElements, MODEL, REASONING, opened, keydown, tap, expectedLabel, reset, check, checkAsync, step } from './harness.mjs'
 import { seed, nameText, toastText, seedVisible, CATALOG, FAVORITES, useFavorites, submittedRoutes, modelPickPanel, modelPickRows, modelPickCell, modelPickNames, modelPickRowIsHere, modelPickLevelChips, modelPickLanded, modelPickLevelNames, modelPickLevelOn, modelPickSelected, modelPickFooter } from './helpers.mjs'
-// --- the model picker --------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
 
 checkAsync('the model key opens a picker instead of walking the list', async () => {
   seedVisible()
@@ -1033,5 +1017,3 @@ checkAsync('the settings page reads the catalog instead of asking for an id', as
   await flush()
   assert.equal(MODEL.catalogReads, before + 1, 'the group must read the catalog off the host, once')
 })
-
-

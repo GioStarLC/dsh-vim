@@ -9,6 +9,7 @@ import { BOOL_SEATS, LIMITS, NS, SEND_MODES } from './constants.js'
 import { applyPatch, copy, defaults, isBindableKey, keyLabel, normalizeKey, sanitizeFavorites, subscribe } from './preferences.js'
 import { EN, ZH, localeIsZh, paletteText } from './strings.js'
 import { catalogGroups, offeredModels } from './models.js'
+import { commitComposerTitle } from './board-view.js'
 
 /**
  * The hint line, inside the shell's dock row.
@@ -67,6 +68,75 @@ function SendHintLine() {
     },
     head + sendKeyLabel() + '+Enter ' + paletteText('hintSendSends')
   )
+}
+
+/**
+ * The title field, a seat in the input bar's own left list.
+ *
+ * The bar is the row that holds this input's attach mark and mode chips. The
+ * host paints that list last, after the chips, inside a wrapper that is
+ * `display: contents`, so the field is a flex item of the row itself: `order`
+ * is what puts it ahead of the attach mark, without moving the host's DOM.
+ * It is a plain field, not the rich editor, which is what keeps the shell's
+ * own typing rules and this plugin's key guard in agreement — `isEditable`
+ * hands every printable key to an input.
+ */
+var COMPOSER_TITLE_UI = {
+  // First in the row, before the attach mark: the host's own list renders
+  // after it, so only flex order can place the field up front.
+  order: '-1',
+  width: '132px',
+  maxWidth: '30vw',
+  height: '24px',
+  padding: '0 8px',
+  borderRadius: '999px',
+  border: '1px solid var(--dsw-alias-divider, rgba(120, 120, 128, 0.28))',
+  background: 'transparent',
+  color: 'inherit',
+  fontFamily: 'inherit',
+  fontSize: '12px',
+  fontWeight: '500',
+  lineHeight: '22px',
+}
+
+/**
+ * What Enter and Escape mean in the title field.
+ *
+ * Enter is this field's own gesture, so it is taken before the shell can
+ * read it as a send; Escape is how every other field in this plugin is left,
+ * and leaving it clears the line so the next input starts plain. Tab is left
+ * alone: a field a keyboard cannot be walked out of is a trap.
+ * @param {KeyboardEvent} ev - the keydown.
+ * @returns {void}
+ */
+function onComposerTitleKey(ev) {
+  var key = ev && ev.key ? String(ev.key) : ''
+  if (key !== 'Enter' && key !== 'Escape') return
+  if (typeof ev.preventDefault === 'function') ev.preventDefault()
+  if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+  var input = ev.target
+  if (key === 'Enter') {
+    commitComposerTitle(input)
+    return
+  }
+  if (!input) return
+  input.value = ''
+  if (typeof input.blur === 'function') input.blur()
+}
+
+/** The title field itself: one line, kept uncontrolled, read on Enter. */
+function ComposerTitleField() {
+  return React.createElement('input', {
+    type: 'text',
+    className: 'dshv-composer-title',
+    defaultValue: '',
+    style: COMPOSER_TITLE_UI,
+    placeholder: paletteText('composerTitlePlaceholder'),
+    title: paletteText('composerTitle'),
+    'aria-label': paletteText('composerTitleLabel'),
+    'data-role': 'composerTitle',
+    onKeyDown: onComposerTitleKey,
+  })
 }
 
 /**
@@ -797,6 +867,30 @@ function installSettings(ctx) {
       // reason for being is the keyboard, and the keyboard still works.
       console.warn('[dsh-vim] composer dock registration failed', error)
     }
+    try {
+      // The title field is a seat in the input bar's own left list — the row
+      // that holds the attach mark and the mode chips — rather than a line
+      // under the box: it belongs to this input, and the bar is where this
+      // host puts the things one input carries.
+      slots.inject('conversation.input.left', function () {
+        return slots.register(
+          {
+            name: 'conversation.input.left',
+            id: 'dsh-vim-title',
+            order: 30,
+            locale: NS,
+            inject: function () {
+              return {}
+            },
+          },
+          ComposerTitleField
+        )
+      })
+    } catch (error) {
+      // A host that keeps its input bar to itself loses the title field and
+      // nothing else.
+      console.warn('[dsh-vim] input bar registration failed', error)
+    }
   }
 }
 
@@ -804,5 +898,5 @@ function installSettings(ctx) {
 // activation
 // ---------------------------------------------------------------------
 
-
+/** Debug and tuning surface, also used by tools/selftest.mjs. */
 export { installSettings, SendHintLine }

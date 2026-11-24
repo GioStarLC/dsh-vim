@@ -127,6 +127,7 @@ var DEFAULTS = {
   sendBlurs: true,
   sendMode: 'host',
   snapshotKeepDays: 3650,
+  autoRename: true,
   favorites: [],
 }
 
@@ -174,7 +175,7 @@ var NUMERIC_SEATS = ['step', 'tau', 'repeatDelay', 'paletteFont', 'paletteWidth'
  * preference we cannot forget to handle: adding one seat is a `DEFAULTS`
  * entry plus its name, and every other path asks this list.
  */
-var BOOL_SEATS = ['escapeBlurs', 'spaceBlurs', 'switchBlurs', 'sendBlurs']
+var BOOL_SEATS = ['escapeBlurs', 'spaceBlurs', 'switchBlurs', 'sendBlurs', 'autoRename']
 
 /** Where the task window may sit on screen. */
 var PLACES = ['top', 'center', 'bottom']
@@ -245,6 +246,15 @@ var BOARD_STORE_VERSION = 2
  * been opened can still hold one.
  */
 var NOTE_KEY = NS + '/notes/v1'
+
+/**
+ * Where the words handed to a conversation wait for its message box.
+ *
+ * Written under its own key for the same reason the notes are: a hand-over
+ * that has not landed yet is the reader's words, and taking the board down
+ * - or storing a board this build cannot read - must not cost them.
+ */
+var HANDOFF_KEY = NS + '/handoff/v1'
 
 /**
  * The pages the board used to be, in a database of their own.
@@ -409,6 +419,15 @@ var BOARD_BLOCK_COLUMNS = 3
  */
 var BOARD_ROW_COLUMNS = 3
 var BOARD_CARD_W = 280
+/**
+ * How far a thought is stepped in from the conversation it belongs to.
+ *
+ * A note filed under a conversation used to be the same width as the card
+ * above it, which made one column read as two conversations. The step in is
+ * what says which of the two is the work and which is what was thought
+ * about it.
+ */
+var BOARD_NOTE_INDENT = 14
 /** How tall a card's ⋯ menu stands, for deciding which way it opens. */
 var BOARD_CARD_MENU_H = 44
 /** The air inside a panel, and the gap between two of its columns. */
@@ -481,10 +500,14 @@ var BOARD_ZOOM_MAX = 1.6
  * How far the fit mark may shrink the canvas.
  *
  * Lower than the hand's floor on purpose: the fit answers "show me all of
- * it", and a board of twenty goals still has to be seen whole. The hand's
- * floor is about reading one card; this one is about the shape of the day.
+ * it", and a board of twenty goals still has to be seen whole. A floor here
+ * would clip the very thing the fit promises - a narrow window would keep
+ * the right-hand panel off screen - so the fit keeps shrinking until the
+ * width and the height both fit, and this only stops short of nothing. The
+ * hand's floor is about reading one card; this one is about the shape of
+ * the day.
  */
-var BOARD_ZOOM_FIT_MIN = 0.2
+var BOARD_ZOOM_FIT_MIN = 0.05
 /** The step one press of the zoom buttons takes. */
 var BOARD_ZOOM_STEP = 1.12
 /**
@@ -645,102 +668,4 @@ var BOARD_UNDO_MS = 5000
 var BOARD_TITLE_SETTLE_MS = 4000
 
 
-export {
-  BOARD_UNDO_MS,
-  BOARD_TITLE_SETTLE_MS,
-  CHAR_NEWLINE,
-  NS,
-  STORAGE_KEY,
-  RAW_INPUT_SELECTOR,
-  COMPOSER_SELECTOR,
-  MODAL_SELECTOR,
-  ACTIVATING_SELECTOR,
-  TRIGGER_MENU_SELECTOR,
-  FOCUS_REQUEST_MS,
-  SEND_HAND_BACK_MS,
-  DOUBLE_ENTER_MS,
-  REWRITTEN_FLAG,
-  SEND_MODES,
-  DEFAULTS,
-  KEY_GROUPS,
-  MODEL_SEATS,
-  NUMERIC_SEATS,
-  BOOL_SEATS,
-  PLACES,
-  PENDING_LABELS,
-  PALETTE_LIMIT,
-  PALETTE_STEP,
-  PALETTE_WINDOW_MS,
-  DONE_PULSE_MS,
-  BOARD_KEY,
-  BOARD_STORE_VERSION,
-  NOTE_KEY,
-  HISTORY_DB_NAME,
-  HISTORY_DB_VERSION,
-  HISTORY_STORE_DAYS,
-  HISTORY_STORE_META,
-  HISTORY_BACKUP_KEY,
-  JOURNAL_DB_NAME,
-  JOURNAL_DB_VERSION,
-  JOURNAL_STORE_EVENTS,
-  SNAPSHOT_MOMENT_KEY,
-  CARRY_KEY,
-  SNAPSHOT_VERSION,
-  SNAPSHOT_KEEP_DEFAULT,
-  DAY_MS,
-  BOARD_STORE_RETRY_MS,
-  BOARD_PRUNE_MS,
-  HISTORY_EXPORT_KIND,
-  BOARD_CARRY_DROP_DAYS,
-  BOARD_PANEL_ID,
-  OVERVIEW_PANEL_ID,
-  BOARD_INBOX,
-  BOARD_DONE,
-  VERDICT_KEYS,
-  BOARD_BLOCK_W,
-  BOARD_BLOCK_H,
-  BOARD_BLOCK_GAP_X,
-  BOARD_BLOCK_GAP_Y,
-  BOARD_BLOCK_PITCH_X,
-  BOARD_BLOCK_PITCH_Y,
-  BOARD_BLOCK_COLUMNS,
-  BOARD_ROW_COLUMNS,
-  BOARD_CARD_W,
-  BOARD_BLOCK_PAD,
-  BOARD_COLUMN_GAP,
-  BOARD_CARD_CHROME_H,
-  BOARD_CARD_LINE_H,
-  BOARD_FLOAT_W,
-  BOARD_GOAL_NAME_MAX,
-  BOARD_GOAL_INTENT_MAX,
-  BOARD_EDITOR_MIN_ROWS,
-  BOARD_NOTE_BODY_ROWS,
-  BOARD_DONE_PREVIEW,
-  BOARD_EDITOR_MAX_ROWS,
-  BOARD_CANVAS_EDGE,
-  BOARD_TIDY_GAP,
-  BOARD_TIDY_STEP,
-  BOARD_BLOCK_HEAD_H,
-  BOARD_TIDY_GLIDE,
-  BOARD_MIN_FONT,
-  BOARD_ZOOM_MIN,
-  BOARD_ZOOM_MAX,
-  BOARD_ZOOM_FIT_MIN,
-  BOARD_ZOOM_STEP,
-  BOARD_FIT_PAD,
-  BOARD_TIDY_COLUMNS,
-  BOARD_SLOTS,
-  BOARD_SLOP,
-  BOARD_SORT_EDGE,
-  BOARD_GOAL_MENU_W,
-  ROW_CELLS,
-  PHASES,
-  PHASES_KEY,
-  PEEK_SOURCE,
-  PEEK_CONCURRENCY,
-  PEEK_TIMEOUT_MS,
-  LIMITS,
-  REPEAT_INTERVAL,
-  MIN_REPEAT_INTERVAL,
-  REPEAT_RAMP,
-}
+export { BOARD_UNDO_MS, BOARD_TITLE_SETTLE_MS, CHAR_NEWLINE, NS, STORAGE_KEY, RAW_INPUT_SELECTOR, COMPOSER_SELECTOR, MODAL_SELECTOR, ACTIVATING_SELECTOR, TRIGGER_MENU_SELECTOR, FOCUS_REQUEST_MS, SEND_HAND_BACK_MS, DOUBLE_ENTER_MS, REWRITTEN_FLAG, SEND_MODES, DEFAULTS, KEY_GROUPS, MODEL_SEATS, NUMERIC_SEATS, BOOL_SEATS, PLACES, PENDING_LABELS, PALETTE_LIMIT, PALETTE_STEP, PALETTE_WINDOW_MS, DONE_PULSE_MS, BOARD_KEY, BOARD_STORE_VERSION, NOTE_KEY, HANDOFF_KEY, HISTORY_DB_NAME, HISTORY_DB_VERSION, HISTORY_STORE_DAYS, HISTORY_STORE_META, HISTORY_BACKUP_KEY, JOURNAL_DB_NAME, JOURNAL_DB_VERSION, JOURNAL_STORE_EVENTS, SNAPSHOT_MOMENT_KEY, CARRY_KEY, SNAPSHOT_VERSION, SNAPSHOT_KEEP_DEFAULT, DAY_MS, BOARD_STORE_RETRY_MS, BOARD_PRUNE_MS, HISTORY_EXPORT_KIND, BOARD_CARRY_DROP_DAYS, BOARD_PANEL_ID, OVERVIEW_PANEL_ID, BOARD_INBOX, BOARD_DONE, VERDICT_KEYS, BOARD_BLOCK_W, BOARD_BLOCK_H, BOARD_BLOCK_GAP_X, BOARD_BLOCK_GAP_Y, BOARD_BLOCK_PITCH_X, BOARD_BLOCK_PITCH_Y, BOARD_BLOCK_COLUMNS, BOARD_ROW_COLUMNS, BOARD_CARD_W, BOARD_BLOCK_PAD, BOARD_COLUMN_GAP, BOARD_CARD_CHROME_H, BOARD_CARD_LINE_H, BOARD_FLOAT_W, BOARD_GOAL_NAME_MAX, BOARD_GOAL_INTENT_MAX, BOARD_EDITOR_MIN_ROWS, BOARD_NOTE_BODY_ROWS, BOARD_DONE_PREVIEW, BOARD_EDITOR_MAX_ROWS, BOARD_CANVAS_EDGE, BOARD_TIDY_GAP, BOARD_TIDY_STEP, BOARD_BLOCK_HEAD_H, BOARD_TIDY_GLIDE, BOARD_MIN_FONT, BOARD_ZOOM_MIN, BOARD_ZOOM_MAX, BOARD_ZOOM_FIT_MIN, BOARD_ZOOM_STEP, BOARD_FIT_PAD, BOARD_TIDY_COLUMNS, BOARD_SLOTS, BOARD_SLOP, BOARD_SORT_EDGE, BOARD_GOAL_MENU_W, ROW_CELLS, PHASES, PHASES_KEY, PEEK_SOURCE, PEEK_CONCURRENCY, PEEK_TIMEOUT_MS, LIMITS, REPEAT_INTERVAL, MIN_REPEAT_INTERVAL, REPEAT_RAMP, BOARD_NOTE_INDENT, BOARD_CARD_MENU_H }

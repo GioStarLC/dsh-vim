@@ -5,13 +5,13 @@
  */
 import { BOARD } from './board-state.js'
 import { boardPointerDown, endBoardDrag, onBoardDoubleClick, onBoardDragLeave, onBoardDragOver, onBoardDrop, onNativeDragEnd } from './board-gestures.js'
-import { renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock, addBoardCard, commitGoalIntent, closeIdeaFocus } from './board-view.js'
+import { closeGoalMenu, closeIdeaFocus, closeIdeaMenu, closeSeatMenu, closeSessionMenu, closeVerdictMenu, commitGoalIntent, addBoardCard, renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock } from './board-view.js'
 import { addBoardGoal, watchForks } from './board-notes.js'
 import { BOARD_HISTORY, BOARD_STORE } from './board-stores.js'
 import { BOARD_UI, boardIcon } from './board-css.js'
-import { tidyBoard } from './board-canvas.js'
+import { settleBoardOverlap, tidyBoard } from './board-canvas.js'
 import { boardShowOverview } from './board-hooks.js'
-import { settings } from './preferences.js'
+import { applyPatch, settings } from './preferences.js'
 import { paletteText } from './strings.js'
 import { taskServices } from './sessions.js'
 import { BOARD_MIN_FONT, BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, BOARD_ZOOM_STEP } from './constants.js'
@@ -25,6 +25,7 @@ import { watchRuns } from './runs.js'
 import { state, stopAnim, stopHold } from './scroll.js'
 import { serviceOf, taskCtx } from './sessions.js'
 import { PALETTE } from './task-window.js'
+import { SAID } from './turns.js'
 
 /**
  * Mount the board.
@@ -97,6 +98,10 @@ function mountBoardInto(root, mode) {
   // it; a page does not take the keyboard, so it leaves the claim alone.
   if (mode === 'overlay') clearFocusRequest()
   if (mode === 'page') {
+    // The page marks itself: a right press on it is the way back, and the
+    // press has to be able to tell the page from every other element the
+    // host puts in the main area.
+    root.setAttribute('data-role', 'boardPage')
     applyBoardPageInk(root)
     Object.assign(root.style, BOARD_PAGE_UI.surface)
     // A canvas is read at a glance from a distance, so it starts at the
@@ -243,6 +248,9 @@ function mountBoardInto(root, mode) {
   BOARD.undoButton = undo
   BOARD.redoButton = redo
   BOARD.historyButton = historyChip
+  // The chips that write or rearrange, so a page can put the whole row away
+  // in one place instead of each press remembering to check.
+  BOARD.actionChips = [only, undo, redo, arrange, write, makeGoal]
   header.appendChild(zoom)
   header.appendChild(undo)
   header.appendChild(redo)
@@ -267,6 +275,37 @@ function mountBoardInto(root, mode) {
     })
     header.appendChild(overviewChip)
   }
+  // The heading's own settings, at the far right: the board can name a
+  // conversation by itself, so it has to be able to be told not to. A sheet
+  // rather than a page — the switch is about the canvas behind it, and two
+  // presses is all it should cost.
+  var settingsWrap = document.createElement('span')
+  Object.assign(settingsWrap.style, BOARD_UI.settingsWrap)
+  var settingsChip = document.createElement('span')
+  Object.assign(settingsChip.style, BOARD_UI.action)
+  settingsChip.setAttribute('role', 'button')
+  settingsChip.setAttribute('data-role', 'boardSettings')
+  settingsChip.setAttribute('title', paletteText('boardSettingsHint'))
+  settingsChip.setAttribute('aria-label', paletteText('boardSettingsHint'))
+  settingsChip.setAttribute('aria-expanded', 'false')
+  settingsChip.textContent = paletteText('boardSettings')
+  settingsChip.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.settingsMenu) {
+      closeBoardSettings()
+      return
+    }
+    // One sheet at a time: the card menus are menus of the canvas, and this
+    // one is the heading's.
+    closeIdeaMenu()
+    closeSessionMenu()
+    closeSeatMenu()
+    closeGoalMenu()
+    closeVerdictMenu()
+    openBoardSettings(settingsWrap, settingsChip)
+  })
+  settingsWrap.appendChild(settingsChip)
+  header.appendChild(settingsWrap)
 
   var body = document.createElement('div')
   Object.assign(body.style, mode === 'page' ? BOARD_PAGE_UI.body : BOARD_UI.body)
@@ -339,7 +378,14 @@ function mountBoardInto(root, mode) {
   BOARD.ideaFocusAt = null
   BOARD.ideaFocusRaf = 0
   BOARD.paintOwed = false
+  BOARD.saidPaint = 0
   renderBoard()
+  // A panel grows when a conversation is added to it, so a board left as
+  // yesterday's shape can open onto two panels standing on each other. That
+  // is squared up on sight rather than behind a key the reader has to
+  // remember, and without the press's other half: filing is the reader's
+  // decision, and the thoughts they left on the paper stay where they are.
+  settleBoardOverlap()
   startDayTimer()
 
   // Both feeds can change under an open board: a conversation can be
@@ -384,7 +430,130 @@ function mountBoardInto(root, mode) {
       window.removeEventListener('resize', onBoardResize)
     })
   }
+  // The window can change size without the browser's resize event: the
+  // shell collapses its sidebar, the inspector opens, the conversation and
+  // the board share the room differently. A fit answers to the box the
+  // canvas really stands in, so that box is watched directly and a fitted
+  // board follows it the same way it follows the window.
+  if (typeof window !== 'undefined' && typeof window.ResizeObserver === 'function') {
+    var fitWatch = new window.ResizeObserver(function () {
+      onBoardResize()
+    })
+    fitWatch.observe(body)
+    BOARD.unsubscribes.push(function () {
+      fitWatch.disconnect()
+    })
+  }
   return true
+}
+
+/**
+ * One switch in the heading's settings sheet.
+ *
+ * A row is a box, what the switch is called, and why it is there: a toggle
+ * whose reason is a sentence away reads as unexplained. The row paints
+ * itself, so turning one needs no repaint of the canvas behind it.
+ * @param {object} row - `{ role, name, hint, read, write }`.
+ * @returns {Element} the row, with its box in the state the store says.
+ */
+function boardSettingsRow(row) {
+  var node = document.createElement('div')
+  Object.assign(node.style, BOARD_UI.settingsRow)
+  node.setAttribute('role', 'checkbox')
+  node.setAttribute('data-role', row.role)
+  var box = document.createElement('span')
+  var words = document.createElement('span')
+  Object.assign(words.style, BOARD_UI.settingsLabel)
+  var name = document.createElement('span')
+  Object.assign(name.style, BOARD_UI.settingsName)
+  name.textContent = row.name
+  var hint = document.createElement('span')
+  Object.assign(hint.style, BOARD_UI.settingsHint)
+  hint.textContent = row.hint
+  words.appendChild(name)
+  words.appendChild(hint)
+  function paint() {
+    var on = row.read() !== false
+    node.setAttribute('aria-checked', on ? 'true' : 'false')
+    Object.assign(box.style, BOARD_UI.settingsBox)
+    if (on) Object.assign(box.style, BOARD_UI.settingsBoxOn)
+    box.textContent = on ? '\u2713' : ''
+  }
+  node.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    // What the press writes is read from the store, never from the box: a
+    // drawing that disagrees with the preference must not become the truth.
+    row.write(row.read() === false)
+    paint()
+  })
+  paint()
+  node.appendChild(box)
+  node.appendChild(words)
+  return node
+}
+
+/**
+ * Open the heading's settings sheet under the chip that asked for it.
+ *
+ * A sheet rather than a page: it hangs off its own chip, the canvas behind
+ * it is what its switches are about, and the next press anywhere else puts
+ * it away. Rows are added one at a time, so a second switch is a row and
+ * nothing else.
+ * @param {Element} wrap - the chip's own box, which anchors the sheet.
+ * @param {Element} mark - the chip, so it can say it is open.
+ * @returns {boolean} whether the sheet is up.
+ */
+function openBoardSettings(wrap, mark) {
+  if (!wrap || !mark) return false
+  closeBoardSettings()
+  var sheet = document.createElement('div')
+  Object.assign(sheet.style, BOARD_UI.settingsSheet)
+  sheet.setAttribute('data-role', 'boardSettingsMenu')
+  sheet.setAttribute('role', 'dialog')
+  sheet.setAttribute('aria-label', paletteText('boardSettings'))
+  var heading = document.createElement('div')
+  Object.assign(heading.style, BOARD_UI.settingsTitle)
+  heading.textContent = paletteText('boardSettings')
+  sheet.appendChild(heading)
+  // The first switch, and the one the board needed: whether it may write a
+  // conversation's title on its own. A locked title is out of reach in
+  // either state (see `settleBranchName`, `nameSessionForCard`).
+  sheet.appendChild(boardSettingsRow({
+    role: 'boardAutoRenameToggle',
+    name: paletteText('boardAutoRename'),
+    hint: paletteText('boardAutoRenameHint'),
+    read: function () {
+      return settings.autoRename !== false
+    },
+    write: function (on) {
+      applyPatch({ autoRename: on })
+    },
+  }))
+  wrap.appendChild(sheet)
+  BOARD.settingsMenu = true
+  BOARD.settingsMark = mark
+  BOARD.settingsSheet = sheet
+  mark.setAttribute('aria-expanded', 'true')
+  return true
+}
+
+/**
+ * Put the heading's settings sheet away, without a repaint.
+ *
+ * The same bargain every menu on this canvas makes: the next press does
+ * whatever it was going to do, and the sheet is taken off the heading where
+ * it stands rather than by redrawing the board under the pointer.
+ * @returns {void}
+ */
+function closeBoardSettings() {
+  if (!BOARD.settingsMenu) return
+  BOARD.settingsMenu = false
+  var mark = BOARD.settingsMark
+  BOARD.settingsMark = null
+  if (mark) mark.setAttribute('aria-expanded', 'false')
+  var sheet = BOARD.settingsSheet
+  BOARD.settingsSheet = null
+  if (sheet && sheet.parentNode) sheet.parentNode.removeChild(sheet)
 }
 
 /**
@@ -400,6 +569,17 @@ function unmountBoard() {
   BOARD.open = false
   stopDayTimer()
   closeBoardHistory()
+  // The sheet goes with the heading that anchors it.
+  closeBoardSettings()
+  // A page the reader stepped into does not outlive the board: the next
+  // opening is today, whatever day was on the canvas when it closed.
+  BOARD.historyDate = ''
+  BOARD.historyMonth = ''
+  BOARD.historyArmed = ''
+  BOARD.actionChips = []
+  // The bar is the board's own paper, so unmounting it is all it takes -
+  // but a reference left behind would keep a press aimed at a dead node.
+  BOARD.historyBanner = null
   for (var i = 0; i < BOARD.unsubscribes.length; i++) {
     try {
       BOARD.unsubscribes[i]()
@@ -414,6 +594,14 @@ function unmountBoard() {
   // are none left to keep honest.
   stopBoardClock()
   BOARD.clocks = []
+  // So do the asks the cards made: a peek landing after this would repaint
+  // a board that is gone, and would keep conversations open for a window
+  // nobody is looking at.
+  SAID.release()
+  if (BOARD.saidPaint) {
+    window.clearTimeout(BOARD.saidPaint)
+    BOARD.saidPaint = 0
+  }
   BOARD.statuses = ''
   BOARD.noteEditing = ''
   BOARD.noteEditor = null
@@ -512,4 +700,4 @@ function closeBoard() {
 }
 
 
-export { closeBoard, mountBoardInto, openBoard, unmountBoard }
+export { closeBoard, mountBoardInto, openBoard, unmountBoard, closeBoardSettings }

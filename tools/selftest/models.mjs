@@ -1,14 +1,6 @@
-/**
- * Behaviour checks: the reasoning level and the switchable models.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
+import { composer, body, editor, shellFocus, flush, press, fakeWindow, fakeDocument, MODEL, REASONING, keydown, tap, expectedLabel, check, checkAsync, step } from './harness.mjs'
 import { seed, renameBox, toastText, toastHost, seedVisible } from './helpers.mjs'
-// --- the reasoning level ----------------------------------------------------
-
-
-
-
 
 checkAsync('the reasoning key steps the level and leaves the model alone', async () => {
   seedVisible()
@@ -190,11 +182,3 @@ check('the reasoning key can be rebound, and cannot collide with the page keys',
   assert.equal(applied.effortKey, 'z', 'a free key is accepted')
   assert.equal(fakeWindow.__dshVim.settings().downKey, 'd', 'and the other seats are untouched')
 })
-
-// --- the switchable models ---------------------------------------------------
-
-
-
-
-
-

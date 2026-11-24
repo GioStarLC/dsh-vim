@@ -1,25 +1,6 @@
-/**
- * Behaviour checks: mounting, unmounting, and the feeds.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
+import { now, clock, matches, transcript, sidebar, composer, button, body, editor, listeners, fire, flush, press, stored, fakeStorage, fakeWindow, fakeDocument, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, feed, registry, renames, statusFeed, MODEL, projections, opened, makeCtx, loadBundle, client, cleanup, keydown, movePointer, tap, SHIPPED, expectedLabel, checks, reset, check, checkAsync, step, bumpChecks, setMediaReduce } from './harness.mjs'
 import { seed, ago, rowNodes, stateChip, rightTracks, statusTrack, footerText, renderedRowIds, toastText, seedVisible, CATALOG, FAVORITES, useFavorites, placeChoice, renderedStatuses, elapsedLabel, liveChip, renderedTurns, boardKey } from './helpers.mjs'
-check('the board and overview pages render with the React the bundle imported', () => {
-  // The host calls these components; a module that used `React` without
-  // importing it would only fail here, on the page the reader actually opens.
-  const mains = ctx.log.slots.main || []
-  const icons = ctx.log.slots['sidebar.panellist'] || []
-  assert.equal(mains.length >= 2, true, 'the board and the overview are both contributed')
-  for (const entry of mains) {
-    assert.ok(entry.component({}), 'every main panel renders')
-  }
-  for (const entry of icons) {
-    assert.ok(entry.component({ size: 16 }), 'every sidebar icon renders')
-  }
-})
-
-
-// --- lifecycle --------------------------------------------------------------
 
 check('the popup honours the configured size, spacing and position', () => {
   seed([
@@ -84,7 +65,6 @@ check('the popup navigates with its own keys, not the scroll keys', () => {
   assert.equal(fakeWindow.__dshVim.palette().open, true, 'with the window still up')
   tap('Escape')
 })
-
 
 check('the settings page exposes every binding, plus font size and position', () => {
   const elements = settingsElements()
@@ -220,9 +200,6 @@ check('the active position toggle is marked pressed', () => {
   const pressed = choiceButtons(PLACE_LABELS()).map((b) => b.props['aria-pressed'])
   assert.deepEqual(pressed, ['false', 'true', 'false'], 'exactly the current position is pressed')
 })
-
-
-
 
 check('each conversation shows what it is doing right now', () => {
   seed([
@@ -615,7 +592,6 @@ check('the switch key cannot share a key with the rest of its group', () => {
   assert.equal(fakeWindow.__dshVim.settings().downKey, 'o')
 })
 
-
 check('turn counts appear after the window is already open', () => {
   seed([
     { id: 'a', displayTitle: 'a', updatedAt: ago(1) },
@@ -744,8 +720,10 @@ checkAsync('disposal unmounts the task window, the picker, the notice, and every
   assert.equal(listeners.length, 0, 'no listener may outlive the plugin')
   assert.equal(fakeWindow.__dshVim, undefined)
 })
-// Seed storage directly so this check covers load(), not earlier writes.
+
 step(async () => {
+// Seed storage directly so this check covers load(), not earlier writes.
+{
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
     JSON.stringify({ downKey: 'k', upKey: 'f', step: 200, tau: 90, repeatDelay: 300 })
@@ -770,12 +748,12 @@ step(async () => {
   ctx2.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  stored preferences survive a reload, and new seats take their defaults')
+}
 })
 
-// A stored send mode must come back with the line that names the send key: the
-// mode alone is not enough, because the hint is what tells the user the mode
-// took effect.
 step(async () => {
+// took effect.
+{
   fakeStorage.setItem('dsh-vim/settings/v1', JSON.stringify({ sendMode: 'newline' }))
   const hinted = await loadBundle('?reload=sendmode')
   const ctxH = makeCtx()
@@ -793,11 +771,12 @@ step(async () => {
   ctxH.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a stored send mode reloads with its hint in the composer dock')
+}
 })
 
-// A stored model list must come back cleaned: it is the one preference a
-// hand-edited store could turn into something the key would submit.
 step(async () => {
+// hand-edited store could turn into something the key would submit.
+{
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
     JSON.stringify({
@@ -823,10 +802,12 @@ step(async () => {
   ctxF.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a stored model list reloads cleaned, and its key with it')
+}
 })
 
-// A hand-edited store that collides inside one group must be repaired.
 step(async () => {
+// A hand-edited store that collides inside one group must be repaired.
+{
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
     JSON.stringify({ downKey: 'd', upKey: 'd', paletteUpKey: 'k', paletteDownKey: 'k' })
@@ -842,12 +823,12 @@ step(async () => {
   ctxR.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a hand-edited collision inside a group is repaired on load')
+}
 })
 
-// A hand-edited level seat that collides across the two groups it draws from
-// must be repaired too: the model window's own group is the only place that
-// collision is visible.
 step(async () => {
+// collision is visible.
+{
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
     JSON.stringify({ modelLevelKey: 'q', downKey: 'd', upKey: 'e' })
@@ -863,10 +844,12 @@ step(async () => {
   ctxL.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a level seat that collides with the page seats is repaired on load')
+}
 })
 
-// A hand-damaged store must not brick the plugin.
 step(async () => {
+// A hand-damaged store must not brick the plugin.
+{
   fakeStorage.setItem('dsh-vim/settings/v1', '{ this is not json')
   const quiet = console.warn
   console.warn = () => {}
@@ -879,10 +862,12 @@ step(async () => {
   ctx3.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  malformed stored settings fall back to the defaults')
+}
 })
 
-// A host without the two services must lose the task window only.
 step(async () => {
+// A host without the two services must lose the task window only.
+{
   fakeStorage.clear()
   feed.clear()
   const fourth = await loadBundle('?reload=5')
@@ -900,12 +885,12 @@ step(async () => {
   ctx4.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a host without sessions/uiWorkspace keeps scrolling and drops the task window')
+}
 })
 
-// A host that refuses the dock must lose the hint and nothing else: the whole
-// reason this plugin exists is the keyboard, and a line of text is not worth a
-// broken scroll engine.
 step(async () => {
+// broken scroll engine.
+{
   fakeStorage.clear()
   feed.clear()
   const refused = await loadBundle('?reload=nodock')
@@ -939,10 +924,12 @@ step(async () => {
   ctxN.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a host that refuses the composer dock loses the hint and keeps the keyboard')
+}
 })
 
-// A host with the sessions feed but no archive registry still gets a window.
 step(async () => {
+// A host with the sessions feed but no archive registry still gets a window.
+{
   fakeStorage.clear()
   feed.clear()
   registry.archivedSessionIds = ['would-be-archived']
@@ -958,11 +945,12 @@ step(async () => {
   ctx5.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a host without a workspace registry gets an unfiltered task window')
+}
 })
 
-// A turn already in flight when the plugin arrives is shown but not timed: the
-// start was never seen, and a clock invented for it would be a lie.
 step(async () => {
+// start was never seen, and a clock invented for it would be a lie.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -993,11 +981,12 @@ step(async () => {
   ctx6.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a turn already in flight when the plugin arrives gets no clock')
+}
 })
 
-// A host without the model picker must lose the reasoning key and the model key,
-// and nothing else.
 step(async () => {
+// and nothing else.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -1027,11 +1016,12 @@ step(async () => {
   ctx7.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a host without a model directory loses the two model keys only')
+}
 })
 
-// A client rebuild must not restart the clocks: the host keeps the turn running
-// while the page is replaced around it, so the stamp has to outlive the page.
 step(async () => {
+// while the page is replaced around it, so the stamp has to outlive the page.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -1066,11 +1056,12 @@ step(async () => {
   fakeWindow.__dshVim.palette(false)
   bumpChecks()
   console.log('  ok  a turn that outlives a client rebuild keeps its clock')
+}
 })
 
-// The ledger is a note about a turn, not about a conversation: once the status
-// source says nothing is running there, the stamp goes with the turn.
 step(async () => {
+// source says nothing is running there, the stamp goes with the turn.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -1085,11 +1076,12 @@ step(async () => {
   )
   bumpChecks()
   console.log('  ok  the stamp of a finished turn is dropped')
+}
 })
 
-// A stamp too old to be about the turn running now is not adopted: it would be a
-// clock of hours that never happened.
 step(async () => {
+// clock of hours that never happened.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -1110,11 +1102,12 @@ step(async () => {
   fakeWindow.__dshVim.palette(false)
   bumpChecks()
   console.log('  ok  a stamp too old to be this turn is not adopted')
+}
 })
 
-// A page that has been up for a while must not adopt a stamp from an older one:
-// a conversation it only now meets starting a turn is not that turn.
 step(async () => {
+// a conversation it only now meets starting a turn is not that turn.
+{
   fakeStorage.clear()
   feed.clear()
   statusFeed.map.clear()
@@ -1137,12 +1130,12 @@ step(async () => {
   }
   bumpChecks()
   console.log('  ok  a stamp is not adopted by a page that has moved on')
+}
 })
 
-// The last check, because it unloads the plugin it drives: the send hint is a
-// slot contribution, so it leaves with the registration rather than with a node
-// the plugin painted — but it must leave all the same.
 step(async () => {
+// the plugin painted — but it must leave all the same.
+{
   const ctxLast = makeCtx()
   const last = await loadBundle('?reload=last')
   last.apply(ctxLast)
@@ -1154,14 +1147,12 @@ step(async () => {
   assert.equal(fakeWindow.__dshVim, undefined, 'unloading leaves the page with no plugin on it')
   bumpChecks()
   console.log('  ok  the send hint leaves with the plugin that contributed it')
+}
 })
 
-// A rebuild mounts the same module again, and the dock is a list slot the shell
-// renders entry by entry: a plugin that registers per apply stacks the same
-// sentence on the page until the row is unreadable. Counted here rather than
-// described, because one registration is the only thing standing between a
-// setting and a wall of copies.
 step(async () => {
+// setting and a wall of copies.
+{
   const rebuilt = await loadBundle('?rebuild=once')
   const ctxA = makeCtx()
   rebuilt.apply(ctxA)
@@ -1175,13 +1166,19 @@ step(async () => {
     0,
     'a second mount must not add a second copy of the hint to the dock'
   )
+  assert.equal(
+    (ctxB.log.slots['conversation.input.left'] ?? []).length,
+    0,
+    'nor a second title field to the input bar'
+  )
   bumpChecks()
   console.log('  ok  the composer dock is contributed once, however often the plugin mounts')
+}
 })
 
-// A stage is a fact about a conversation, not about a page: a reload must not
-// lose it, and a value a newer build no longer knows must not come back as one.
 step(async () => {
+// lose it, and a value a newer build no longer knows must not come back as one.
+{
   fakeStorage.clear()
   feed.clear()
   fakeStorage.setItem(
@@ -1205,17 +1202,12 @@ step(async () => {
   stageCtx.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  stages are carried across a reload, and unknown ones are dropped')
+}
 })
 
-// A host whose navigator publishes no archive action: the key must not be a
-// silent no-op, because the user pressed it and the footer has to answer.
-//
-// This runs last, and clears every other instance first. The earlier reload
-// blocks left their own windows and listeners behind, and one of those hosts
-// does publish the action — so a stray listener would archive the row before
-// this check could see the fallback, and `footerText` would read somebody
-// else's window.
 step(async () => {
+// else's window.
+{
   cleanup()
   for (let i = listeners.length - 1; i >= 0; i--) {
     if (listeners[i].type === 'keydown') listeners.splice(i, 1)
@@ -1242,14 +1234,12 @@ step(async () => {
   ctxA.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a host without an archive action says so instead of doing nothing')
+}
 })
 
-// The archive seat arrived in 0.16, and `g` used to be the switch seat's
-// shipped default. A store written before that must come out with `g` on the
-// archive seat and the switch seat on its new default — otherwise the user is
-// left with an archive key they never chose and a switch key that no longer
-// matches the docs.
 step(async () => {
+// matches the docs.
+{
   fakeStorage.clear()
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
@@ -1265,11 +1255,12 @@ step(async () => {
   ctxM.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a pre-archive store keeps g for archiving and moves the switch seat')
+}
 })
 
-// The other half of the same migration: a user who had chosen their own switch
-// key must keep it, and the archive seat must find somewhere else to live.
 step(async () => {
+// key must keep it, and the archive seat must find somewhere else to live.
+{
   fakeStorage.clear()
   fakeStorage.setItem(
     'dsh-vim/settings/v1',
@@ -1285,6 +1276,5 @@ step(async () => {
   ctxK.log.cleanups[0]()
   bumpChecks()
   console.log('  ok  a chosen switch key survives the migration and the archive seat steps aside')
+}
 })
-
-

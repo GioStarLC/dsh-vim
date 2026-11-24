@@ -4,7 +4,7 @@
  * the carried conversations, and the journal of what happened. Each store
  * owns its own keys and its own write path; nothing here paints.
  */
-import { BOARD_EDITOR_MAX_ROWS, BOARD_GOAL_INTENT_MAX, BOARD_GOAL_NAME_MAX, BOARD_INBOX, BOARD_KEY, BOARD_SLOTS, BOARD_STORE_RETRY_MS, BOARD_STORE_VERSION, BOARD_ZOOM_MAX, BOARD_ZOOM_MIN, CARRY_KEY, HISTORY_BACKUP_KEY, HISTORY_DB_NAME, HISTORY_DB_VERSION, HISTORY_STORE_DAYS, HISTORY_STORE_META, JOURNAL_DB_NAME, JOURNAL_DB_VERSION, JOURNAL_STORE_EVENTS, NOTE_KEY, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
+import { BOARD_EDITOR_MAX_ROWS, BOARD_GOAL_INTENT_MAX, BOARD_GOAL_NAME_MAX, BOARD_INBOX, BOARD_KEY, BOARD_SLOTS, BOARD_STORE_RETRY_MS, BOARD_STORE_VERSION, BOARD_ZOOM_MAX, HANDOFF_KEY, BOARD_ZOOM_MIN, CARRY_KEY, HISTORY_BACKUP_KEY, HISTORY_DB_NAME, HISTORY_DB_VERSION, HISTORY_STORE_DAYS, HISTORY_STORE_META, JOURNAL_DB_NAME, JOURNAL_DB_VERSION, JOURNAL_STORE_EVENTS, NOTE_KEY, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
 import { paletteText } from './strings.js'
 import { showToast } from './toast.js'
 import { dayOf, daysBetween } from './time.js'
@@ -238,6 +238,8 @@ function makeBoardStore() {
             // the paper itself, '@inbox' is the tray. Its place is kept, so a
             // note lifted back out returns to where it was.
             filed: typeof card.filed === 'string' ? card.filed : '',
+            // A locked thought keeps its place: a tidy leaves it alone.
+            locked: card.locked === true,
             // The rows the reader dragged it to, or 0 for one line. Clamped
             // on the way in: a hand-edited document cannot ask for a card
             // taller than the canvas knows how to draw.
@@ -697,6 +699,31 @@ function makeBoardStore() {
       return locked
     },
 
+    /**
+     * Lock or unlock one thought's place on the paper.
+     *
+     * A lock is the reader's promise that this card is where it belongs. A
+     * tidy squares the panels up and gives loose cards no orders, but a card
+     * the reader pinned here is not a card to move around at all - not by a
+     * tidy, and not by any future thing that decides to be helpful.
+     * @param {string} id - the card.
+     * @returns {boolean} whether it is now locked.
+     */
+    toggleCardLock(id) {
+      if (typeof id !== 'string' || !id) return false
+      var locked = false
+      update(function (doc) {
+        for (var i = 0; i < doc.cards.length; i++) {
+          if (doc.cards[i].id !== id) continue
+          doc.cards[i].locked = doc.cards[i].locked !== true
+          locked = doc.cards[i].locked
+          return true
+        }
+        return false
+      })
+      return locked
+    },
+
     /** The loose cards, in the order they were written. */
     cards() {
       return read().cards
@@ -716,6 +743,7 @@ function makeBoardStore() {
           link: '',
           done: false,
           filed: '',
+          locked: false,
           // The moment it was made. The first words typed into it are what
           // the journal counts, so this is only the card's own birthday.
           w: Date.now(),
@@ -876,6 +904,7 @@ function makeBoardStore() {
           link: typeof record.link === 'string' ? record.link : '',
           done: record.done === true,
           filed: typeof record.filed === 'string' ? record.filed : '',
+          locked: record.locked === true,
           // An undone delete is the same card, down to its two clocks.
           w: positiveStamp(record.w),
           d: positiveStamp(record.d),
@@ -1969,6 +1998,118 @@ function makeNoteStore() {
 
 var NOTE_STORE = makeNoteStore()
 
+/**
+ * The words handed to a conversation the board was not standing in.
+ *
+ * A hand-over used to open the conversation to reach its box, which cost
+ * the reader the board and made one drop the end of the gesture. The words
+ * wait here instead: one queue per conversation, in the order the cards
+ * were let go, and the box takes the whole of it the next time it mounts -
+ * at the end, on its own line, exactly as the drop used to paste it. Capped,
+ * because a queue is a hand's worth of cards, not a transcript.
+ * @returns {object} the store.
+ */
+function makeHandoffStore() {
+  /** The last serialized form written, so an unchanged one is not rewritten. */
+  var written = ''
+
+  /** How many cards one conversation will wait for. */
+  var CAP = 40
+
+  /** Whatever was stored, reduced to session id -> words for live queues. */
+  function readAll() {
+    var parsed = null
+    try {
+      parsed = JSON.parse(window.localStorage.getItem(HANDOFF_KEY) || 'null')
+    } catch (error) {
+      parsed = null
+    }
+    if (!parsed || parsed.v !== 1 || !parsed.sessions || typeof parsed.sessions !== 'object') return {}
+    var queues = {}
+    for (var id in parsed.sessions) {
+      if (!Object.prototype.hasOwnProperty.call(parsed.sessions, id)) continue
+      var list = parsed.sessions[id]
+      if (!Array.isArray(list)) continue
+      var words = []
+      for (var i = 0; i < list.length && words.length < CAP; i++) {
+        if (typeof list[i] !== 'string') continue
+        var text = list[i].trim()
+        if (!text) continue
+        words.push(text)
+      }
+      if (words.length) queues[id] = words
+    }
+    return queues
+  }
+
+  /** Write the queues back unless they are what was written last time. */
+  function save(queues) {
+    var serialized = JSON.stringify({ v: 1, sessions: queues })
+    if (serialized === written) return
+    written = serialized
+    try {
+      window.localStorage.setItem(HANDOFF_KEY, serialized)
+    } catch (error) {
+      console.warn('[dsh-vim] the waiting hand-over could not be stored', error)
+    }
+  }
+
+  return {
+    /**
+     * What one conversation is waiting for, oldest first.
+     * @param {string} id - session id.
+     * @returns {Array<string>} the words, one entry per card.
+     */
+    pending(id) {
+      return (readAll()[id] || []).slice()
+    },
+
+    /**
+     * Add one card's words to the back of a conversation's queue.
+     *
+     * Appending is the whole order: two cards let go a moment apart arrive
+     * in the box in the order they were dropped, the same way two presses
+     * would have.
+     * @param {string} id - session id.
+     * @param {string} text - what the card says, trimmed.
+     * @returns {number} how many cards are now waiting.
+     */
+    push(id, text) {
+      var word = String(text || '').trim()
+      var queues = readAll()
+      var queue = queues[id] || []
+      if (word && queue.length < CAP) queue.push(word)
+      if (queue.length) queues[id] = queue
+      save(queues)
+      return queue.length
+    },
+
+    /**
+     * Take the oldest cards off one conversation's queue, once they landed.
+     *
+     * Taking exactly what was written, rather than the whole queue, is what
+     * keeps a card let go while the paste was in flight: it stays waiting,
+     * and the flush that follows it puts it in its own block instead of the
+     * queue being emptied underneath it.
+     * @param {string} id - session id.
+     * @param {number} count - how many of the oldest words have landed.
+     * @returns {number} how many cards are still waiting.
+     */
+    take(id, count) {
+      var queues = readAll()
+      var queue = queues[id] || []
+      if (!queue.length) return 0
+      var left = queue.slice(Math.max(0, Number(count) || 0))
+      if (left.length) queues[id] = left
+      else delete queues[id]
+      save(queues)
+      return left.length
+    },
+  }
+}
+
+var HANDOFF_STORE = makeHandoffStore()
+
 // --- the board's history -------------------------------------------------
 //
 // A day's page is what the board read at that moment, frozen: the feed it was
@@ -2453,4 +2594,4 @@ function makeCarryStore() {
 }
 
 
-export { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, CARRY, JOURNAL }
+export { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, CARRY, JOURNAL, HANDOFF_STORE }

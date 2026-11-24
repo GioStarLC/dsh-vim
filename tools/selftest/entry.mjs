@@ -1,12 +1,6 @@
-/**
- * Behaviour checks: the entry anchor and the overview door.
- */
 import assert from 'node:assert/strict'
-import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
-import { arriveInputRow, enterFromBoard, boardSeat } from './helpers.mjs'
-// --- entry anchor: where an opened conversation starts reading ---------------
-
-
+import { clock, el, transcript, sidebar, root, fire, press, fakeStorage, fakeWindow, menu, fakeDocument, feed, registry, statusFeed, currentBinding, opened, makeCtx, loadBundle, wheel, peak, check, step, bumpChecks } from './harness.mjs'
+import { arriveInputRow, enterFromBoard } from './helpers.mjs'
 
 check('a conversation opened at its tail starts at the last thing the reader wrote', () => {
   statusFeed.put('s1', { running: false, completionUnread: true })
@@ -88,46 +82,70 @@ check('leaving the conversation and coming back makes it an arrival again', () =
   assert.equal(transcript.scrollTop, 5984, 'a second visit is read from the same boundary')
 })
 
-
-
 step(async () => {
-  // A host that has the layout panel gets the button; a host without one keeps
-  // the floating board and is not offered a door onto nothing.
-  {
-    fakeStorage.clear()
-    feed.clear()
-    registry.clear()
-    const bundle = await loadBundle('?reload=overview')
-    const ctxO = makeCtx()
-    const chosen = []
-    const base = ctxO.get.bind(ctxO)
-    ctxO.get = (name) => name === 'layout'
-      ? {
-          selectPanel(id) {
-            chosen.push(id)
-          },
-          panelInfo: { getSnapshot: () => ({ activePanelId: '' }) },
-        }
-      : base(name)
-    bundle.apply(ctxO)
-    const apiO = fakeWindow.__dshVim
-    const root = fakeDocument.createElement('div')
-    assert.equal(apiO.boardPage(root), true, 'the board page mounts')
-    const chip = boardSeat(root, 'boardOverview')
-    assert.ok(chip, 'the heading carries the overview button')
-    assert.equal(String(chip.textContent), expectedLabel('overview'), 'with the word the page uses')
-    fireOn(chip, 'click', { type: 'click', stopPropagation() {} })
-    assert.deepEqual(chosen, ['dsh-vim-overview'], 'pressing it selects the overview page')
-  
-    const page = fakeDocument.createElement('div')
-    assert.equal(apiO.overview(page), true, 'the page builds on its own')
-    const back = boardSeat(page, 'overviewBack')
-    assert.ok(back, 'and carries the way back')
-    fireOn(back, 'click', { type: 'click', stopPropagation() {} })
-    assert.deepEqual(chosen, ['dsh-vim-overview', 'dsh-vim-board'], 'which selects the board')
-    apiO.boardPage(null, false)
-    ctxO.log.cleanups[0]()
-    bumpChecks()
-    console.log('  ok  the board heading opens the overview, and the overview opens the board')
+// are read from a marked root, and both spare a field and a selection.
+{
+  fakeStorage.clear()
+  feed.clear()
+  registry.clear()
+  const bundle = await loadBundle('?reload=boardback')
+  const ctxB = makeCtx()
+  const selected = []
+  const base = ctxB.get.bind(ctxB)
+  ctxB.get = (name) => name === 'layout'
+    ? {
+        selectPanel(id) {
+          selected.push(id)
+        },
+        panelInfo: { getSnapshot: () => ({ activePanelId: 'dsh-vim-board' }) },
+      }
+    : base(name)
+  bundle.apply(ctxB)
+  const apiB = fakeWindow.__dshVim
+  const page = fakeDocument.createElement('div')
+  assert.equal(apiB.boardPage(page), true, 'the board page mounts')
+  assert.equal(page.__attrs['data-role'], 'boardPage', 'the page marks itself for the press')
+
+  const press = (node) => {
+    const ev = {
+      type: 'contextmenu', target: node, clientX: 600, clientY: 300,
+      defaultPrevented: false,
+      preventDefault() { ev.defaultPrevented = true },
+    }
+    return fire('contextmenu', ev)
   }
+
+  // A press on neither page is nobody's to take.
+  const elsewhere = press(el({ tag: 'DIV' }))
+  assert.equal(elsewhere.defaultPrevented, false, 'a press on neither page keeps its menu')
+  assert.deepEqual(selected, [], 'and asks for no panel')
+
+  // The field a goal is being renamed in, and a thought being typed, keep the
+  // press they have always had.
+  const field = press(el({ tag: 'DIV', editable: true, parent: page }))
+  assert.equal(field.defaultPrevented, false, 'a press in a field on the page is not claimed')
+  assert.deepEqual(selected, [], 'and the page stays up')
+
+  // Copying is the press a selection claims.
+  fakeDocument.getSelection = () => ({
+    rangeCount: 1,
+    isCollapsed: false,
+    getRangeAt: () => ({ getClientRects: () => [{ left: 0, top: 0, right: 2000, bottom: 2000 }] }),
+  })
+  const chosen = press(el({ tag: 'DIV', parent: page }))
+  fakeDocument.getSelection = undefined
+  assert.equal(chosen.defaultPrevented, false, 'a press inside a text selection is still a copy')
+  assert.deepEqual(selected, [], 'and the page stays up')
+
+  // The bare page answers it — the one press that means "back".
+  const bare = press(el({ tag: 'DIV', parent: page }))
+  assert.equal(bare.defaultPrevented, true, 'the bare press is taken')
+  assert.deepEqual(selected, [null], 'and the layout is asked for no panel, which is the conversation')
+
+  apiB.boardPage(null, false)
+  ctxB.log.cleanups[0]()
+  bumpChecks()
+  console.log('  ok  a right press on the board page is the way back to the conversation')
+}
 })
+

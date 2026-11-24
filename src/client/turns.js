@@ -3,6 +3,20 @@
  * the host has to open, so the reads are queued, budgeted and remembered.
  * The window that asked supplies the repaint; nothing here paints.
  */
+import { BOARD } from './board-state.js'
+
+/** The canvas repaint, injected at activation so turns need not know the view. */
+let saidRepaint = function () {}
+
+/**
+ * Register the repaint the said-peek asks for.
+ * @param {Function} fn - the canvas repaint.
+ * @returns {void}
+ */
+export function setSaidRepaint(fn) {
+  saidRepaint = fn || function () {}
+}
+
 import { PEEK_CONCURRENCY, PEEK_SOURCE, PEEK_TIMEOUT_MS } from './constants.js'
 import { taskServices } from './sessions.js'
 
@@ -22,6 +36,17 @@ import { taskServices } from './sessions.js'
  * a row that has moved on since is asked for again rather than shown stale.
  */
 var TURNS = makeTurnPeek()
+
+/**
+ * The words each conversation was last given, read for its card.
+ *
+ * A ledger of its own rather than a second field on `TURNS`: the count is
+ * read only for rows the task window is showing, while a board asks for
+ * every card on every paint, and one window's queue must never hold the
+ * other's line empty. It is dropped with the board (see `closeBoard`), so
+ * a page nobody is looking at keeps no ask in flight.
+ */
+var SAID = makeSaidPeek()
 
 /**
  * The ledger behind `TURNS`, and the only thing that touches it.
@@ -112,6 +137,88 @@ function makeTurnPeek() {
 }
 
 /**
+ * The ledger behind `SAID`, and the only thing that touches it.
+ *
+ * Same shape as the turn-count ledger, with one difference that matters:
+ * an answer stays valid for a row that is *older* than it, because the board
+ * draws carried copies of a card with a fresher stamp, and a copy that asked
+ * again would overwrite the answer the card itself reads.
+ * @returns {object} the ledger.
+ */
+function makeSaidPeek() {
+  /** id -> { updatedAt, text } — the words read, and how new the read was. */
+  var values = Object.create(null)
+  /** id -> true | cancel() — what is out being asked for. */
+  var inflight = Object.create(null)
+  /** Cards still owed a line, in the order the paint asked for them. */
+  var queue = []
+  /** How many asks are out at once, against PEEK_CONCURRENCY. */
+  var active = 0
+
+  return {
+    /**
+     * The words already read for a conversation, or null while unknown.
+     * @param {object} summary - session summary.
+     * @returns {string|null} the words, or null to ask for them.
+     */
+    known(summary) {
+      var hit = values[summary.id]
+      if (!hit) return null
+      if (Number(hit.updatedAt) < Number(summary.updatedAt)) return null
+      return hit.text
+    },
+    /** Whether this conversation is already out being asked about. */
+    pending(id) {
+      return !!inflight[id]
+    },
+    /** Queue one card, unless its words are known or already owed. */
+    want(summary) {
+      if (this.known(summary) !== null || inflight[summary.id]) return
+      inflight[summary.id] = true
+      queue.push(summary)
+    },
+    /** Start as many queued asks as the concurrency budget allows. */
+    drain(take, paint) {
+      while (active < PEEK_CONCURRENCY && queue.length) {
+        var summary = queue.shift()
+        if (this.known(summary) !== null) {
+          delete inflight[summary.id]
+          continue
+        }
+        active++
+        take(summary, this, {
+          settle: (id, updatedAt, text) => {
+            values[id] = { updatedAt: updatedAt, text: text }
+          },
+          clear: (id) => {
+            delete inflight[id]
+          },
+          done: () => {
+            active--
+          },
+          paint: paint,
+        })
+      }
+    },
+    /** Mark one ask as cancellable once the host has been reached. */
+    watch(id, cancel) {
+      inflight[id] = cancel
+    },
+    /** Drop every queued and in-flight ask; the board went away. */
+    release() {
+      queue.length = 0
+      for (var id in inflight) {
+        if (!Object.prototype.hasOwnProperty.call(inflight, id)) continue
+        var cancel = inflight[id]
+        if (typeof cancel === 'function') cancel()
+        else delete inflight[id]
+      }
+      active = 0
+    },
+  }
+}
+
+/**
  * The turn count already peeked for a conversation, or null.
  * @param {object} summary - session summary.
  * @returns {number|null} the count, or null while unknown.
@@ -146,6 +253,167 @@ function drainPeeks(paint) {
   TURNS.drain(peekTurns, function () {
     if (paint) paint()
   })
+}
+
+/**
+ * Ask what each conversation was last given, before its card is built.
+ *
+ * The catalogue's own summary carries a name, a stamp and a flag — nothing
+ * said — so the words on a card come from the session's `turnOutline`
+ * projection, read the way the turn count is read. Asked once per version
+ * of a conversation: the ledger keeps the answer, and a card whose words
+ * arrived paints them instead of asking again.
+ * @param {Array} pool - the conversations this paint draws a card for.
+ * @returns {void}
+ */
+function wantSaidFor(pool) {
+  for (var i = 0; i < pool.length; i++) {
+    var summary = pool[i]
+    if (!summary || !summary.id) continue
+    SAID.want(summary)
+  }
+  drainSaid()
+}
+
+/**
+ * Start the asks the budget allows, and paint what lands.
+ *
+ * The repaint is a task rather than a call: a peek can settle inside the
+ * paint that asked for it, and rebuilding the stage from under a paint in
+ * progress would leave half of each. It also keeps the queue moving — a
+ * card whose answer landed frees the slot the next one waits for.
+ * @returns {void}
+ */
+function drainSaid() {
+  SAID.drain(peekSaid, function () {
+    if (BOARD.saidPaint) return
+    BOARD.saidPaint = window.setTimeout(function () {
+      BOARD.saidPaint = 0
+      if (BOARD.open) saidRepaint()
+      drainSaid()
+    }, 0)
+  })
+}
+
+/**
+ * The last words a conversation was given, out of its turn outline.
+ *
+ * The host folds every turn into `{ turn, seq, prompt, response }` and
+ * hands the prompt over already collapsed to one line and clipped, so the
+ * card only has to take the newest turn that still has words in it: a turn
+ * whose prompt was a file drop, or one that has not started, has none.
+ * @param {Array} outline - the `turnOutline` projection value.
+ * @returns {string} the words, or '' when the conversation has said nothing.
+ */
+function promptOf(outline) {
+  for (var at = outline.length - 1; at >= 0; at--) {
+    var turn = outline[at]
+    var text = turn && turn.prompt
+    if (typeof text === 'string' && text !== '') return text
+  }
+  return ''
+}
+
+/**
+ * Read one conversation's last prompt, and let go of it again.
+ *
+ * The words come from the session's `turnOutline` projection - the host's
+ * own fold of every turn into `{ turn, seq, prompt, response }`, the prompt
+ * already collapsed to one line and clipped - which is what lets a card say
+ * what a conversation is about without paging a transcript for it. The
+ * scope is released on every path, and a session that never answers loses
+ * its hold at PEEK_TIMEOUT_MS rather than for as long as the page lives.
+ * @param {object} summary - session summary.
+ * @param {object} book - the ledger that asked for this read.
+ * @param {object} sink - what to do with the answer, and who to tell.
+ */
+function peekSaid(summary, book, sink) {
+  var settled = false
+  var reference = null
+  var off = null
+  var timer = null
+
+  function finish(text) {
+    if (settled) return
+    settled = true
+    if (timer) window.clearTimeout(timer)
+    if (off) {
+      try {
+        off()
+      } catch (error) {
+        /* the host is already gone; nothing to do */
+      }
+    }
+    if (reference) {
+      try {
+        reference.release()
+      } catch (error) {
+        /* ditto */
+      }
+    }
+    sink.clear(summary.id)
+    sink.settle(summary.id, summary.updatedAt, typeof text === 'string' ? text : '')
+    sink.done()
+    if (sink.paint) sink.paint()
+  }
+
+  book.watch(summary.id, finish)
+  try {
+    var services = taskServices()
+    if (!services || !services.controller || typeof services.controller.retainScope !== 'function') {
+      finish()
+      return
+    }
+    reference = services.controller.retainScope(summary.id, PEEK_SOURCE)
+    // A conversation that is not on screen has no binding until the host has
+    // opened it, so the read waits for the reference: "not open yet" is not
+    // the same answer as "has nothing to say".
+    var ready = reference && reference.ready
+    function read() {
+      if (settled) return
+      try {
+        var projections = reference && reference.binding && reference.binding.session
+          ? reference.binding.session.projections
+          : null
+        if (!projections || typeof projections.faceOf !== 'function') {
+          finish()
+          return
+        }
+        var outline = projections.faceOf('turnOutline')
+        function accept() {
+          var list = outline && typeof outline.getSnapshot === 'function'
+            ? outline.getSnapshot()
+            : undefined
+          if (!Array.isArray(list)) return false
+          finish(promptOf(list))
+          return true
+        }
+        if (!accept() && typeof outline.subscribe === 'function') {
+          off = outline.subscribe(function () {
+            accept()
+          })
+          timer = window.setTimeout(function () {
+            finish()
+          }, PEEK_TIMEOUT_MS)
+          // The value may have landed between the read and the subscription.
+          accept()
+        } else if (!settled) {
+          finish()
+        }
+      } catch (error) {
+        finish()
+      }
+    }
+    if (ready && typeof ready.then === 'function') {
+      ready.then(read, function () {
+        finish()
+      })
+    } else {
+      read()
+    }
+  } catch (error) {
+    finish()
+  }
 }
 
 /**
@@ -231,4 +499,4 @@ function cancelPeeks() {
 }
 
 
-export { requestTurns, drainPeeks, cancelPeeks, turnsOf }
+export { requestTurns, drainPeeks, cancelPeeks, turnsOf, drainSaid, peekSaid, promptOf, wantSaidFor, SAID }

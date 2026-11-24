@@ -1,17 +1,5 @@
-/**
-
- * Shared helpers for the behaviour suites: seeding the fake host, reading
-
- * what the board and the windows drew, and the gestures a check makes.
-
- * Every suite imports this before its own checks.
-
- */
 import assert from 'node:assert/strict'
-import { now, clock, el, arrivedRows, transcript, sidebar, composer, button, body, editor, synthKeys, record, fire, fireOn, clickThrough, press, stored, fakeDatabases, fakeWindow, menu, aimAt, resetHitTest, ReactStub, settingsElements, feed, registry, currentBinding, MODEL, REASONING, ctx, keydown, tap, expectedLabel, checks, reset, check } from './harness.mjs'
-
-
-
+import { now, clock, el, arrivedRows, transcript, sidebar, composer, button, body, editor, synthKeys, record, fire, fireOn, clickThrough, press, stored, fakeDatabases, fakeWindow, menu, fakeDocument, aimAt, resetHitTest, ReactStub, settingsElements, feed, registry, currentBinding, MODEL, REASONING, ctx, keydown, tap, expectedLabel, checks, reset, check } from './harness.mjs'
 
 /**
  * Arm the double-Enter mode with a draft in the box and the caret in it, which
@@ -59,6 +47,18 @@ function sendHintText() {
 }
 
 /**
+ * Render the input bar's title field, which is registered in that row's list.
+ * @returns {object} the rendered element.
+ */
+function renderComposerTitle() {
+  const entries = ctx.log.slots['conversation.input.left'] ?? []
+  const entry = entries.find((each) => each.spec.id === 'dsh-vim-title')
+  if (!entry) throw new Error('the title field was never contributed to the input bar; slots=' + Object.keys(ctx.log.slots).join('|') + '; injected=' + ctx.log.injected.join('|'))
+  ReactStub.reset()
+  return entry.component({ t: (k) => k })
+}
+
+/**
  * Publish a catalogue of conversations, oldest-first in the id list so the
  * ordering assertion has to come from updatedAt rather than from insertion.
  * @param {Array<object>} rows - summaries; updatedAt decides the order.
@@ -78,7 +78,6 @@ const HOUR = 60 * 60 * 1000
 /**
  * A timestamp the given number of hours in the past.
  * @param {number} hours - how far back.
-
  * @returns {number} epoch milliseconds.
  */
 function ago(hours) {
@@ -158,8 +157,6 @@ function clickMore() {
   fireOn(heading, 'mousedown', { type: 'mousedown', preventDefault() {}, stopPropagation() {} })
 }
 
-// The violet the plugin paints the "you are here" chip with. A status chip and
-// this one are the only coloured cells on a row, so the state checks have to
 // tell them apart by more than "has a colour".
 const HERE_COLOR = '#c4b5fd'
 
@@ -646,6 +643,45 @@ function boardDoc() {
   return null
 }
 
+/**
+ * What each conversation is waiting for, read out of the plugin's own storage.
+ *
+ * The hand-over queue is written under its own key, so a check can say what a
+ * conversation's draft will receive without a message box ever being mounted.
+ * @returns {object} session id -> the words waiting for it, oldest first.
+ */
+function handoffQueues() {
+  for (const key of stored.keys()) {
+    if (!key.endsWith('/handoff/v1')) continue
+    const parsed = JSON.parse(stored.get(key) || '{}')
+    return (parsed && parsed.sessions) || {}
+  }
+  return {}
+}
+
+/**
+ * Record what the plugin types into the message box, as the text that leaves.
+ *
+ * The box is typed into line by line: an insertText carries one line, and an
+ * insertParagraph is the break between two of them. Joining the run back into a
+ * string is how a check says what the box would hold — a "
+" inside a single
+ * insertText is the shape that lands as one paragraph, so it is exactly what
+ * these checks must not accept.
+ * @returns {{commands: string[], text: () => string}} the run, and its reading.
+ */
+function recordTyping() {
+  const commands = []
+  const lines = []
+  fakeDocument.execCommand = (command, _showUI, text) => {
+    commands.push(command)
+    if (command === 'insertParagraph') lines.push(String.fromCharCode(10))
+    else lines.push(String(text === null || text === undefined ? '' : text))
+    return true
+  }
+  return { commands, text: () => lines.join('') }
+}
+
 /** A named seat inside one node, at any depth. */
 function boardSeat(node, role, seen) {
   // A fake element can end up in more than one parent's children (appendChild
@@ -884,7 +920,7 @@ function cardStateWords(id) {
   const offered = boardSeat(card, 'cardStateAdd')
   if (computed) return String(computed.textContent)
   if (said) return String(said.textContent)
-  return offered ? '+' : ''
+  return offered ? String(offered.textContent) : ''
 }
 
 /** The card of one conversation, as it stands on the board now. */
@@ -940,6 +976,24 @@ function fileANote(text) {
 /** One conversation, on screen, inside today — the shape the note needs. */
 function seedCurrent(id = 'here') {
   seed([{ id, displayTitle: 'where I am', updatedAt: todayAt(3), retainedBy: { mainView: 1 } }])
+}
+
+/**
+ * Open a conversation from the board, the way a press on its card does.
+ *
+ * The hand-over waits for the box, so a check that wants to see the words land
+ * opens the conversation rather than dropping on a band and expecting a paste.
+ * @param {string} id - session id.
+ * @returns {void}
+ */
+function openBoardCard(id) {
+  const card = boardCard(id)
+  assert.ok(card, 'the board shows the conversation ' + id)
+  // A drop leaves the "that was a carry, not a click" flag standing, so the
+  // press comes first - the same idiom every mark on the board is tapped with.
+  pressForDrag(card, 6, 6)
+  fire('pointerup', { type: 'pointerup' })
+  fireOn(card, 'click', { type: 'click', stopPropagation() {} })
 }
 
 /** The board card for one conversation, or null when it is not on the canvas. */
@@ -1157,4 +1211,4 @@ function enterFromBoard(id) {
   currentBinding.open(id)
 }
 
-export { armDoubleEnter, renderSendHint, sendHintText, seed, HOUR, ago, headerCount, listNodes, rowNodes, sectionHeaders, sectionNames, moreHeadingNode, clickMore, HERE_COLOR, isHereChip, hereChip, stateChip, STAGE_KEYS, stageBox, stageWord, markedStage, folderPrefix, nameText, rightTracks, statusTrack, renameBox, typeIn, pressIn, footerText, renderedRowIds, toastText, toastNode, toastHost, seedVisible, CATALOG, FAVORITES, useFavorites, submittedRoutes, modelPickPanel, modelPickRows, modelPickCell, modelPickNames, modelPickRowIsHere, modelPickLevelChips, modelPickLanded, modelPickLevelNames, modelPickLevelOn, modelPickRowText, modelPickSelected, modelPickFooter, todayAt, boardPanel, boardBody, boardStage, boardBlocks, boardBlock, cardsIn, boardCardIds, looseCards, boardHeading, boardDoc, boardSeat, blockHead, goalMenuMark, openGoalMenu, pressForDrag, dragTo, writeCardButton, noteLines, tapMark, ideaFocusHost, ideaFocusSheet, ideaFocusField, ideaFocusMark, ideaFocusOpen, writeIdea, openIdeaFocusOn, closeIdeaSheet, cancelIdeaSheet, tidyButton, doneBinList, finishedCard, boardWithFinishedCard, cardStateWords, cardOf, dragOnto, historyButton, fileANote, seedCurrent, boardCard, cardNoteBox, cardNoteLine, cardNotePin, cardsUnder, writeCardNote, fileThought, placeChoice, renderedStatuses, elapsedLabel, liveChip, renderedTurns, boardKey, drawnColumns, journalLines, arriveInputRow, enterFromBoard }
+export { armDoubleEnter, renderSendHint, sendHintText, renderComposerTitle, seed, HOUR, ago, headerCount, listNodes, rowNodes, sectionHeaders, sectionNames, moreHeadingNode, clickMore, HERE_COLOR, isHereChip, hereChip, stateChip, STAGE_KEYS, stageBox, stageWord, markedStage, folderPrefix, nameText, rightTracks, statusTrack, renameBox, typeIn, pressIn, footerText, renderedRowIds, toastText, toastNode, toastHost, seedVisible, CATALOG, FAVORITES, useFavorites, submittedRoutes, modelPickPanel, modelPickRows, modelPickCell, modelPickNames, modelPickRowIsHere, modelPickLevelChips, modelPickLanded, modelPickLevelNames, modelPickLevelOn, modelPickRowText, modelPickSelected, modelPickFooter, todayAt, boardPanel, boardBody, boardStage, boardBlocks, boardBlock, cardsIn, boardCardIds, looseCards, boardHeading, boardDoc, handoffQueues, recordTyping, boardSeat, blockHead, goalMenuMark, openGoalMenu, pressForDrag, dragTo, writeCardButton, noteLines, tapMark, ideaFocusHost, ideaFocusSheet, ideaFocusField, ideaFocusMark, ideaFocusOpen, writeIdea, openIdeaFocusOn, closeIdeaSheet, cancelIdeaSheet, tidyButton, doneBinList, finishedCard, boardWithFinishedCard, cardStateWords, cardOf, dragOnto, historyButton, fileANote, seedCurrent, openBoardCard, boardCard, cardNoteBox, cardNoteLine, cardNotePin, cardsUnder, writeCardNote, fileThought, placeChoice, renderedStatuses, elapsedLabel, liveChip, renderedTurns, boardKey, drawnColumns, journalLines, arriveInputRow, enterFromBoard }

@@ -34,7 +34,6 @@ function BoardPage() {
   React.useEffect(function () {
     var node = hostRef.current
     if (!node) return undefined
-    node.setAttribute('data-role', 'boardPage')
     node.className = 'dshv-window'
     mountBoardInto(node, 'page')
     return function () {

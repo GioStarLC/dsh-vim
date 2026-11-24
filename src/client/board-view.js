@@ -4,18 +4,19 @@
  * chips, renaming, the idea sheet, and the paste helpers. Presses are
  * attached through board-hooks; the gesture module owns what they do.
  */
-import { BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_DONE, BOARD_DONE_PREVIEW, BOARD_GOAL_MENU_W, BOARD_INBOX, BOARD_PRUNE_MS, BOARD_ROW_COLUMNS, BOARD_BLOCK_HEAD_H, BOARD_SLOTS, BOARD_SLOP, BOARD_TITLE_SETTLE_MS, BOARD_UNDO_MS, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
+import { NS, BOARD_CARD_MENU_H, BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_DONE, BOARD_DONE_PREVIEW, BOARD_GOAL_MENU_W, BOARD_INBOX, BOARD_PRUNE_MS, BOARD_ROW_COLUMNS, BOARD_BLOCK_HEAD_H, BOARD_SLOTS, BOARD_SLOP, BOARD_TITLE_SETTLE_MS, BOARD_UNDO_MS, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
 import { BOARD, boardFieldOpen, boardTitleOf, raiseBoardCard } from './board-state.js'
-import { BOARD_HISTORY, BOARD_STORE, CARRY, NOTE_STORE } from './board-stores.js'
-import { BOARD_INK, NOTE_PAPER, BOARD_UI, boardIcon } from './board-css.js'
+import { BOARD_HISTORY, BOARD_STORE, CARRY, HANDOFF_STORE, NOTE_STORE } from './board-stores.js'
+import { BOARD_INK, NOTE_PAPER, BOARD_UI, boardIcon, solidPaper } from './board-css.js'
 import { applyBoardZoom, blockInk, blockSeat, boardBlockWidth, boardBlocks, boardCardBox, boardCardOpenBox, boardCardStacked, boardEditorRows, boardExtent, boardJoinText, boardNoteMetrics, boardPanelHeights, boardPanelWidths, boardPlaces, boardRowOf, boardSlots, goalHue, nextCardPlace, noteInkOf, notePaper, noteParts, parkCardOutside, slotHue } from './board-canvas.js'
 import { beginBoardNote, cancelBoardNote, cardVerdictOf, commitBoardNote, rememberFork, revealBoardCard } from './board-notes.js'
 import { boardDrawLinks, boardOpenSession, boardPress } from './board-hooks.js'
-import { maybeShowSeal, noteMoment, pageDoc, pageView, settleDay } from './board-history.js'
+import { paintHistoryPage, maybeShowSeal, noteMoment, pageDoc, pageView, settleDay } from './board-history.js'
 import { openNewSessionSheet } from './board-sheet.js'
 import { renameSession } from './session-actions.js'
 import { refusal } from './errors.js'
-import { composerRoot, focusComposer } from './focus.js'
+import { settings } from './preferences.js'
+import { composerRoot, focusComposer, isComposerEditor } from './focus.js'
 import { elapsedText, runSince } from './runs.js'
 import { reducedMotion } from './scroll.js'
 import { conversationPool, currentSession, folderIndex, statusIsLive, statusOf, taskServices } from './sessions.js'
@@ -23,6 +24,7 @@ import { paletteText } from './strings.js'
 import { TOAST, showToast } from './toast.js'
 import { clockDelay, tickClocks } from './task-window.js'
 import { dayOf } from './time.js'
+import { SAID, drainSaid, peekSaid, promptOf, wantSaidFor } from './turns.js'
 
 function renderBoard() {
   if (!BOARD.open || !BOARD.body || !BOARD.stage) return
@@ -35,6 +37,13 @@ function renderBoard() {
   // them used to be able to rebuild the stage under the caret. What such a
   // paint would have shown is drawn by the paint that closes the field.
   if (boardFieldOpen()) return
+  // A page is drawn instead of today, and the branch stands ahead of the
+  // filing and the flush: a day being read must not be sealed, and today
+  // must not be written through a paint that is not looking at it.
+  if (BOARD.historyDate) {
+    paintHistoryPage()
+    return
+  }
   // A new day is filed before anything is drawn: the page left behind belongs
   // to yesterday, and today's starts from the members it carried.
   settleDay()
@@ -48,7 +57,7 @@ function renderBoard() {
   // folded into the store first. Typing also writes on every input, so this
   // is only the last keystroke that had not landed yet.
   if (BOARD.cardEditing && BOARD.cardEditor) {
-BOARD_STORE.setCardText(BOARD.cardEditing, BOARD.cardEditor.value)
+    BOARD_STORE.setCardText(BOARD.cardEditing, BOARD.cardEditor.value)
   }
   // How tall each panel stood on the paint being taken down. A fresh
   // block is packed against the panels already standing, and the only
@@ -70,7 +79,10 @@ BOARD_STORE.setCardText(BOARD.cardEditing, BOARD.cardEditor.value)
   BOARD.cardEditor = null
   BOARD.clocks = []
   BOARD.folders = folderIndex()
-  var pool = conversationPool()
+  // Blank rows are asked for here: a conversation the board started has no
+  // turn yet, and without it the card the reader just asked for would not be
+  // drawn at all (see the blank rule in `boardBlocks`).
+  var pool = conversationPool(true)
   // A name the reader sent and the shell has not echoed yet is dropped here,
   // where the list this paint draws is already in hand.
   settleTitles(pool)
@@ -79,16 +91,24 @@ BOARD_STORE.setCardText(BOARD.cardEditing, BOARD.cardEditor.value)
   // cannot draw has nothing left to sort, and a carried row is still drawn -
   // so the list to keep is the pool plus what came in from the last page.
   if (Date.now() - (BOARD.prunedAt || 0) > BOARD_PRUNE_MS) {
-BOARD.prunedAt = Date.now()
-var kept = []
-for (var keptAt = 0; keptAt < pool.length; keptAt++) kept.push(pool[keptAt].id)
-var brought = CARRY.all()
-for (var broughtId in brought) {
-  if (Object.prototype.hasOwnProperty.call(brought, broughtId)) kept.push(broughtId)
-}
-BOARD_STORE.prune(kept)
+    BOARD.prunedAt = Date.now()
+    var kept = []
+    for (var keptAt = 0; keptAt < pool.length; keptAt++) kept.push(pool[keptAt].id)
+    var brought = CARRY.all()
+    for (var broughtId in brought) {
+      if (Object.prototype.hasOwnProperty.call(brought, broughtId)) kept.push(broughtId)
+    }
+    BOARD_STORE.prune(kept)
   }
   var blocks = boardBlocks(pool)
+  // What each card was last told is asked for before the cards are built, so
+  // a conversation whose words are already known is painted with them rather
+  // than growing them a frame later (see `wantSaidFor`). Only the rows this
+  // paint draws are asked for: a muted or filed-away conversation has no card
+  // to show the answer on.
+  var drawn = []
+  for (var d = 0; d < blocks.length; d++) drawn = drawn.concat(blocks[d].rows)
+  wantSaidFor(drawn)
   var places = boardPlaces(blocks, carried, carriedWide)
   BOARD.blocks = blocks
   BOARD.slots = boardSlots(blocks)
@@ -100,15 +120,15 @@ BOARD_STORE.prune(kept)
   var workspaces = 0
   var i
   for (i = 0; i < blocks.length; i++) {
-if (blocks[i].kind === 'workspace') workspaces = workspaces + 1
-BOARD.rows = BOARD.rows.concat(blocks[i].rows)
+    if (blocks[i].kind === 'workspace') workspaces = workspaces + 1
+    BOARD.rows = BOARD.rows.concat(blocks[i].rows)
   }
   BOARD.inbox = blocks.length ? blocks[blocks.length - 1].rows.slice() : []
   var titles = Object.create(null)
   for (i = 0; i < pool.length; i++) titles[pool[i].id] = boardTitleOf(pool[i])
   BOARD.dupes = boardNameCollisions(titles)
   for (i = 0; i < blocks.length; i++) {
-BOARD.stage.appendChild(buildBoardBlock(blocks[i], places[blocks[i].key], titles))
+    BOARD.stage.appendChild(buildBoardBlock(blocks[i], places[blocks[i].key], titles))
   }
   // The paper is sized last, because a panel is as tall as the
   // conversations in it and only the painted panels know that height:
@@ -125,43 +145,43 @@ BOARD.stage.appendChild(buildBoardBlock(blocks[i], places[blocks[i].key], titles
   // without a repaint; only the paths are rewritten.
   BOARD.linkLayer = null
   if (typeof document.createElementNS === 'function') {
-var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-svg.setAttribute('data-role', 'boardLinks')
-svg.setAttribute('width', String(extent.width))
-svg.setAttribute('height', String(extent.height))
-Object.assign(svg.style, BOARD_UI.linkLayer)
-svg.style.width = extent.width + 'px'
-svg.style.height = extent.height + 'px'
-BOARD.stage.appendChild(svg)
-BOARD.linkLayer = svg
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+    svg.setAttribute('data-role', 'boardLinks')
+    svg.setAttribute('width', String(extent.width))
+    svg.setAttribute('height', String(extent.height))
+    Object.assign(svg.style, BOARD_UI.linkLayer)
+    svg.style.width = extent.width + 'px'
+    svg.style.height = extent.height + 'px'
+    BOARD.stage.appendChild(svg)
+    BOARD.linkLayer = svg
   }
   var cards = BOARD_STORE.cards()
   var drawn = 0
   for (i = 0; i < cards.length; i++) {
-// A filed note is drawn where it was filed, not on the paper as well.
-if (cards[i].filed) continue
-// A thought filed under a conversation is drawn in that conversation's
-// column already; drawing it loose as well would be the same card twice.
-if (boardCardStacked(cards[i])) continue
-var note = buildBoardLooseCard(cards[i], titles)
-// Every card has a number, so overlap has an answer: the one being
-// worked on is the one on top (`BOARD.front`), and the rest stack in the
-// order they are drawn rather than by whichever happened to be last.
-if (BOARD.front !== cards[i].id) note.style.zIndex = String(2 + drawn)
-drawn = drawn + 1
-BOARD.stage.appendChild(note)
+    // A filed note is drawn where it was filed, not on the paper as well.
+    if (cards[i].filed) continue
+    // A thought filed under a conversation is drawn in that conversation's
+    // column already; drawing it loose as well would be the same card twice.
+    if (boardCardStacked(cards[i])) continue
+    var note = buildBoardLooseCard(cards[i], titles)
+    // Every card has a number, so overlap has an answer: the one being
+    // worked on is the one on top (`BOARD.front`), and the rest stack in the
+    // order they are drawn rather than by whichever happened to be last.
+    if (BOARD.front !== cards[i].id) note.style.zIndex = String(2 + drawn)
+    drawn = drawn + 1
+    BOARD.stage.appendChild(note)
   }
   if (!BOARD.rows.length && !cards.length) {
-var empty = document.createElement('div')
-Object.assign(empty.style, BOARD_UI.emptyBoard)
-empty.setAttribute('data-role', 'emptyBoard')
-empty.textContent = paletteText('boardEmptyBoard')
-BOARD.stage.appendChild(empty)
+    var empty = document.createElement('div')
+    Object.assign(empty.style, BOARD_UI.emptyBoard)
+    empty.setAttribute('data-role', 'emptyBoard')
+    empty.textContent = paletteText('boardEmptyBoard')
+    BOARD.stage.appendChild(empty)
   }
   if (BOARD.count) {
-BOARD.count.textContent =
-  paletteText('boardTodayCount') + workspaces + paletteText('boardWorkspacesUnit')
-  + BOARD.rows.length + paletteText('boardSessionsUnit')
+    BOARD.count.textContent =
+      paletteText('boardTodayCount') + workspaces + paletteText('boardWorkspacesUnit')
+      + BOARD.rows.length + paletteText('boardSessionsUnit')
   }
   paintBoardStarFilter()
   paintHistory()
@@ -172,11 +192,11 @@ BOARD.count.textContent =
   // shut and still be there the next time it opens.
   var drewOn = dayOf(Date.now())
   noteMoment({
-v: SNAPSHOT_VERSION,
-date: drewOn,
-doc: pageDoc(),
-notes: NOTE_STORE.all(),
-view: pageView(blocks, places, titles, cards, drewOn),
+    v: SNAPSHOT_VERSION,
+    date: drewOn,
+    doc: pageDoc(),
+    notes: NOTE_STORE.all(),
+    view: pageView(blocks, places, titles, cards, drewOn),
   })
   // The fingerprint this repaint leaves behind is what the throttled status
   // repaint reads itself against.
@@ -186,39 +206,39 @@ view: pageView(blocks, places, titles, cards, drewOn),
   // A field this repaint built is the one the reader asked for: the caret
   // goes in it, at the end of what it already carries.
   if (BOARD.noteEditing && BOARD.noteEditor) {
-BOARD.noteEditor.focus()
-if (typeof BOARD.noteEditor.select === 'function') BOARD.noteEditor.select()
+    BOARD.noteEditor.focus()
+    if (typeof BOARD.noteEditor.select === 'function') BOARD.noteEditor.select()
   }
   if (BOARD.cardEditing && BOARD.cardEditor) {
-BOARD.cardEditor.focus()
-if (typeof BOARD.cardEditor.setSelectionRange === 'function') {
-  // An empty field starts at its first line - that line is the title, and
-  // the reader is about to write it.
-  var end = String(BOARD.cardEditor.value || '').length
-  BOARD.cardEditor.setSelectionRange(0, end)
-  if (!end) BOARD.cardEditor.setSelectionRange(0, 0)
-}
+    BOARD.cardEditor.focus()
+    if (typeof BOARD.cardEditor.setSelectionRange === 'function') {
+      // An empty field starts at its first line - that line is the title, and
+      // the reader is about to write it.
+      var end = String(BOARD.cardEditor.value || '').length
+      BOARD.cardEditor.setSelectionRange(0, end)
+      if (!end) BOARD.cardEditor.setSelectionRange(0, 0)
+    }
   }
   if (BOARD.renamingBlock && BOARD.renameBlockInput) {
-BOARD.renameBlockInput.focus()
-if (typeof BOARD.renameBlockInput.select === 'function') BOARD.renameBlockInput.select()
+    BOARD.renameBlockInput.focus()
+    if (typeof BOARD.renameBlockInput.select === 'function') BOARD.renameBlockInput.select()
   }
   if (BOARD.renamingCard && BOARD.renameCardInput) {
-BOARD.renameCardInput.focus()
-if (typeof BOARD.renameCardInput.select === 'function') BOARD.renameCardInput.select()
+    BOARD.renameCardInput.focus()
+    if (typeof BOARD.renameCardInput.select === 'function') BOARD.renameCardInput.select()
   }
   if (BOARD.intentBlock && BOARD.intentInput) {
-BOARD.intentInput.focus()
-if (typeof BOARD.intentInput.select === 'function') BOARD.intentInput.select()
+    BOARD.intentInput.focus()
+    if (typeof BOARD.intentInput.select === 'function') BOARD.intentInput.select()
   }
   // The beat is owed once per completion, so the ledger keeps only what is
   // still finished and still on the canvas: a conversation that runs again
   // and finishes again gets its beat again.
   var owed = Object.create(null)
   for (var f = 0; f < BOARD.rows.length; f++) {
-if (!BOARD.freshed[BOARD.rows[f].id]) continue
-var rowState = statusOf(BOARD.rows[f])
-if (rowState && rowState.key === 'done') owed[BOARD.rows[f].id] = true
+    if (!BOARD.freshed[BOARD.rows[f].id]) continue
+    var rowState = statusOf(BOARD.rows[f])
+    if (rowState && rowState.key === 'done') owed[BOARD.rows[f].id] = true
   }
   BOARD.freshed = owed
   // Last, because it measures what was just put on the page.
@@ -230,11 +250,11 @@ if (rowState && rowState.key === 'done') owed[BOARD.rows[f].id] = true
   // paint leaves it standing. If the card it was showing is gone, the sheet
   // goes with it; otherwise its done mark is read from the fresh store.
   if (BOARD.ideaFocusHost) {
-if (BOARD.ideaFocus && !ideaFocusCard(BOARD.ideaFocus)) {
-  closeIdeaFocus({ discard: true, paint: false })
-} else {
-  paintIdeaFocusDone()
-}
+    if (BOARD.ideaFocus && !ideaFocusCard(BOARD.ideaFocus)) {
+      closeIdeaFocus({ discard: true, paint: false })
+    } else {
+      paintIdeaFocusDone()
+    }
   }
   mountDoneBin(titles)
 }
@@ -270,6 +290,9 @@ out += BOARD.rows[i].id + ':' + (status ? status.key : '-') + ';'
  */
 function renderBoardOnStatus() {
   if (!BOARD.open) return
+  // A page does not change under the feed: the days it is made of are the
+  // page's own, and a status tick is news about today.
+  if (BOARD.historyDate) return
   if (boardStatusFingerprint() === BOARD.statuses) return
   renderBoard()
 }
@@ -552,8 +575,10 @@ function buildBoardBlock(block, place, titles) {
   // same colour tomorrow whatever else is on the canvas.
   var hue = goalHue(block)
   if (hue !== null) {
-node.style.background = 'hsl(' + hue + ' 55% 50% / 0.05)'
-node.style.borderColor = 'hsl(' + hue + ' 42% 45% / 0.22)'
+    // The hue goes over the column's grey, and both go over the base: a
+    // panel has to hide the one it stands on, not show it through.
+    node.style.background = solidPaper('hsl(' + hue + ' 55% 50% / 0.05)', BOARD_INK.column)
+    node.style.borderColor = 'hsl(' + hue + ' 42% 45% / 0.22)'
   }
   node.style.left = place.x + 'px'
   node.style.top = place.y + 'px'
@@ -585,13 +610,13 @@ node.style.borderColor = 'hsl(' + hue + ' 42% 45% / 0.22)'
   caret.setAttribute('role', 'button')
   caret.setAttribute('title', paletteText(folded ? 'boardGoalUnfold' : 'boardGoalFold'))
   caret.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-BOARD_STORE.toggleBlockFold(block.key)
-renderBoard()
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    BOARD_STORE.toggleBlockFold(block.key)
+    renderBoard()
   })
   var dot = document.createElement('span')
   Object.assign(dot.style, BOARD_UI.blockDot)
@@ -600,85 +625,85 @@ renderBoard()
   // The dot is the colour, so it is also where the colour is chosen. The
   // tray has no wheel: it is not a goal and wears no hue of its own.
   if (block.kind !== 'inbox') {
-dot.setAttribute('role', 'button')
-dot.setAttribute('data-no-drag', 'true')
-dot.setAttribute('title', paletteText('boardGoalSeatHint'))
-dot.setAttribute('aria-label', paletteText('boardGoalSeat'))
-dot.setAttribute('aria-expanded', BOARD.seatMenu === block.key ? 'true' : 'false')
-dot.style.cursor = 'pointer'
-dot.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  closeGoalMenu()
-  BOARD.seatMenu = BOARD.seatMenu === block.key ? '' : block.key
-  renderBoard()
-})
+    dot.setAttribute('role', 'button')
+    dot.setAttribute('data-no-drag', 'true')
+    dot.setAttribute('title', paletteText('boardGoalSeatHint'))
+    dot.setAttribute('aria-label', paletteText('boardGoalSeat'))
+    dot.setAttribute('aria-expanded', BOARD.seatMenu === block.key ? 'true' : 'false')
+    dot.style.cursor = 'pointer'
+    dot.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      closeGoalMenu()
+      BOARD.seatMenu = BOARD.seatMenu === block.key ? '' : block.key
+      renderBoard()
+    })
   }
   // The goal's name, typed in place from the ⋯ menu. A panel starts as a
   // workspace and usually becomes the thing the reader is working toward,
   // so the name is theirs: clearing it gives the workspace's own name back.
   var name
   if (block.kind !== 'inbox' && BOARD.renamingBlock === block.key) {
-name = document.createElement('input')
-Object.assign(name.style, BOARD_UI.blockRenameBox)
-name.setAttribute('type', 'text')
-name.setAttribute('data-role', 'blockRename')
-name.setAttribute('aria-label', paletteText('boardGoalName'))
-name.setAttribute('placeholder', paletteText('boardGoalPlaceholder'))
-name.value = block.label
-name.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') {
-    ev.preventDefault()
-    commitBlockRename()
-  } else if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelBlockRename()
-  }
-})
-name.addEventListener('blur', function () {
-  if (BOARD.renamingBlock === block.key && BOARD.renameBlockInput === name) commitBlockRename()
-})
-// A field is the field's: the router reads this and leaves the press
-// alone, so the text in it can be selected with the pointer.
-name.setAttribute('data-no-drag', 'true')
-BOARD.renameBlockInput = name
+    name = document.createElement('input')
+    Object.assign(name.style, BOARD_UI.blockRenameBox)
+    name.setAttribute('type', 'text')
+    name.setAttribute('data-role', 'blockRename')
+    name.setAttribute('aria-label', paletteText('boardGoalName'))
+    name.setAttribute('placeholder', paletteText('boardGoalPlaceholder'))
+    name.value = block.label
+    name.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        commitBlockRename()
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelBlockRename()
+      }
+    })
+    name.addEventListener('blur', function () {
+      if (BOARD.renamingBlock === block.key && BOARD.renameBlockInput === name) commitBlockRename()
+    })
+    // A field is the field's: the router reads this and leaves the press
+    // alone, so the text in it can be selected with the pointer.
+    name.setAttribute('data-no-drag', 'true')
+    BOARD.renameBlockInput = name
   } else {
-name = document.createElement('span')
-Object.assign(name.style, BOARD_UI.blockName)
-name.setAttribute('data-role', 'blockName')
-name.setAttribute('title', block.kind === 'inbox'
-  ? paletteText('boardInboxHint')
-  : paletteText('boardGoalRenameHint'))
-name.textContent = block.label
-// The name is part of the handle: a press on it drags the goal like the
-// rest of the heading, and a press that does not travel folds the panel -
-// the name takes the heading's slack, so the title and the blank after it
-// are the widest target in the row, and a goal being done for now is the
-// common reason to reach for it. Renaming lives behind the ⋯ now, not on
-// a double press: a name field one stray click pair away is not worth the
-// heading's own press having to be taken back. The buttons to the right
-// are targets of their own and never come through here.
-name.addEventListener('dblclick', function (ev) {
-  // Two folds are not a new card: the canvas would otherwise drop a
-  // thought under the heading on the same double press.
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-})
-name.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  // The tray is a list, not a place the reader put there: its name is
-  // the board's own word and has no fold of its own.
-  if (block.kind === 'inbox') return
-  BOARD_STORE.toggleBlockFold(block.key)
-  renderBoard()
-})
+    name = document.createElement('span')
+    Object.assign(name.style, BOARD_UI.blockName)
+    name.setAttribute('data-role', 'blockName')
+    name.setAttribute('title', block.kind === 'inbox'
+      ? paletteText('boardInboxHint')
+      : paletteText('boardGoalRenameHint'))
+    name.textContent = block.label
+    // The name is part of the handle: a press on it drags the goal like the
+    // rest of the heading, and a press that does not travel folds the panel -
+    // the name takes the heading's slack, so the title and the blank after it
+    // are the widest target in the row, and a goal being done for now is the
+    // common reason to reach for it. Renaming lives behind the ⋯ now, not on
+    // a double press: a name field one stray click pair away is not worth the
+    // heading's own press having to be taken back. The buttons to the right
+    // are targets of their own and never come through here.
+    name.addEventListener('dblclick', function (ev) {
+      // Two folds are not a new card: the canvas would otherwise drop a
+      // thought under the heading on the same double press.
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    })
+    name.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      // The tray is a list, not a place the reader put there: its name is
+      // the board's own word and has no fold of its own.
+      if (block.kind === 'inbox') return
+      BOARD_STORE.toggleBlockFold(block.key)
+      renderBoard()
+    })
   }
   // Only the name: the path is on the heading's tooltip, where a reader who
   // wants it can find it, rather than taking half the line on every panel.
@@ -701,52 +726,52 @@ name.addEventListener('click', function (ev) {
   // tray has no such switch - it is a list of what has no place, and a
   // thought put away in it is the whole of what that list says.
   if (block.kind !== 'inbox' && block.rows.length) {
-var ideasHidden = BOARD_STORE.isIdeasHidden(block.key)
-var threads = document.createElement('span')
-Object.assign(threads.style, ideasHidden ? BOARD_UI.blockIdeasOn : BOARD_UI.blockIdeas)
-threads.className = 'dshv-ideas-toggle'
-threads.setAttribute('role', 'button')
-threads.setAttribute('data-role', 'blockIdeas')
-threads.setAttribute('data-hidden', ideasHidden ? 'true' : 'false')
-threads.setAttribute('aria-pressed', ideasHidden ? 'true' : 'false')
-threads.setAttribute('aria-label', paletteText(ideasHidden ? 'boardIdeasShow' : 'boardIdeasHide'))
-threads.setAttribute('title', paletteText(ideasHidden ? 'boardIdeasShow' : 'boardIdeasHide'))
-threads.appendChild(boardIcon(ideasHidden ? 'expand' : 'collapse', 12))
-threads.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  BOARD_STORE.toggleBlockIdeas(block.key)
-  renderBoard()
-})
-head.appendChild(threads)
+    var ideasHidden = BOARD_STORE.isIdeasHidden(block.key)
+    var threads = document.createElement('span')
+    Object.assign(threads.style, ideasHidden ? BOARD_UI.blockIdeasOn : BOARD_UI.blockIdeas)
+    threads.className = 'dshv-ideas-toggle'
+    threads.setAttribute('role', 'button')
+    threads.setAttribute('data-role', 'blockIdeas')
+    threads.setAttribute('data-hidden', ideasHidden ? 'true' : 'false')
+    threads.setAttribute('aria-pressed', ideasHidden ? 'true' : 'false')
+    threads.setAttribute('aria-label', paletteText(ideasHidden ? 'boardIdeasShow' : 'boardIdeasHide'))
+    threads.setAttribute('title', paletteText(ideasHidden ? 'boardIdeasShow' : 'boardIdeasHide'))
+    threads.appendChild(boardIcon(ideasHidden ? 'expand' : 'collapse', 12))
+    threads.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      BOARD_STORE.toggleBlockIdeas(block.key)
+      renderBoard()
+    })
+    head.appendChild(threads)
   }
   // A goal is a place work starts, not only a shelf work is put on. The
   // plus is that start; a card dropped on it is the same start with the
   // words already written. The tray has no plus: it is where work has no
   // home, so starting there would be starting nowhere.
   if (block.kind !== 'inbox') {
-var newSession = document.createElement('span')
-Object.assign(newSession.style, BOARD_UI.blockNewSession)
-newSession.className = 'dshv-goal-new'
-newSession.setAttribute('role', 'button')
-newSession.setAttribute('data-role', 'goalNewSession')
-newSession.setAttribute('data-goal-key', block.key)
-newSession.setAttribute('data-no-drag', 'true')
-newSession.setAttribute('aria-label', paletteText('boardNewSession'))
-newSession.setAttribute('title', paletteText('boardNewSessionHint'))
-newSession.textContent = '+'
-newSession.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  openNewSessionSheet(block)
-})
-head.appendChild(newSession)
+    var newSession = document.createElement('span')
+    Object.assign(newSession.style, BOARD_UI.blockNewSession)
+    newSession.className = 'dshv-goal-new'
+    newSession.setAttribute('role', 'button')
+    newSession.setAttribute('data-role', 'goalNewSession')
+    newSession.setAttribute('data-goal-key', block.key)
+    newSession.setAttribute('data-no-drag', 'true')
+    newSession.setAttribute('aria-label', paletteText('boardNewSession'))
+    newSession.setAttribute('title', paletteText('boardNewSessionHint'))
+    newSession.textContent = '+'
+    newSession.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      openNewSessionSheet(block)
+    })
+    head.appendChild(newSession)
   }
   // The quiet verbs. Renaming a goal is the one that used to be a double
   // press on its name, and a name line is too direct a place for a field:
@@ -754,63 +779,63 @@ head.appendChild(newSession)
   // press meaning the fold. The menu is drawn on the paper, not in the
   // panel, because a panel clips what leaves it.
   if (block.kind !== 'inbox') {
-var goalMenuMark = document.createElement('span')
-Object.assign(goalMenuMark.style, BOARD_UI.cardMore)
-// The sheet decides when the mark shows and lights: an inline opacity
-// would outrank both rules.
-goalMenuMark.style.opacity = ''
-goalMenuMark.className = 'dshv-goal-more'
-goalMenuMark.setAttribute('role', 'button')
-goalMenuMark.setAttribute('data-role', 'goalMenuOpen')
-goalMenuMark.setAttribute('title', paletteText('boardGoalMenu'))
-goalMenuMark.setAttribute('aria-label', paletteText('boardGoalMenu'))
-goalMenuMark.setAttribute('aria-expanded', BOARD.goalMenu === block.key ? 'true' : 'false')
-goalMenuMark.textContent = '\u22ef'
-goalMenuMark.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  // Opening and closing a menu is not a repaint: the board may be
-  // mid-field, and a paint would take the panel out from under the
-  // press that asked. The next paint rebuilds it from this state.
-  if (BOARD.goalMenu === block.key) {
-    closeGoalMenu()
-    return
-  }
-  closeGoalMenu()
-  closeIdeaMenu()
-  closeSessionMenu()
-  closeSeatMenu()
-  BOARD.goalMenu = block.key
-  goalMenuMark.setAttribute('aria-expanded', 'true')
-  var goalMenu = buildGoalMenu(block)
-  placeGoalMenu(goalMenu, block, place)
-  BOARD.stage.appendChild(goalMenu)
-})
-head.appendChild(goalMenuMark)
+    var goalMenuMark = document.createElement('span')
+    Object.assign(goalMenuMark.style, BOARD_UI.cardMore)
+    // The sheet decides when the mark shows and lights: an inline opacity
+    // would outrank both rules.
+    goalMenuMark.style.opacity = ''
+    goalMenuMark.className = 'dshv-goal-more'
+    goalMenuMark.setAttribute('role', 'button')
+    goalMenuMark.setAttribute('data-role', 'goalMenuOpen')
+    goalMenuMark.setAttribute('title', paletteText('boardGoalMenu'))
+    goalMenuMark.setAttribute('aria-label', paletteText('boardGoalMenu'))
+    goalMenuMark.setAttribute('aria-expanded', BOARD.goalMenu === block.key ? 'true' : 'false')
+    goalMenuMark.textContent = '\u22ef'
+    goalMenuMark.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      // Opening and closing a menu is not a repaint: the board may be
+      // mid-field, and a paint would take the panel out from under the
+      // press that asked. The next paint rebuilds it from this state.
+      if (BOARD.goalMenu === block.key) {
+        closeGoalMenu()
+        return
+      }
+      closeGoalMenu()
+      closeIdeaMenu()
+      closeSessionMenu()
+      closeSeatMenu()
+      BOARD.goalMenu = block.key
+      goalMenuMark.setAttribute('aria-expanded', 'true')
+      var goalMenu = buildGoalMenu(block)
+      placeGoalMenu(goalMenu, block, place)
+      BOARD.stage.appendChild(goalMenu)
+    })
+    head.appendChild(goalMenuMark)
   }
   // Closing a place is for the places the reader made. A workspace panel is
   // not theirs to close: it is where its conversations live, and one that is
   // closed comes back the moment a conversation from it moves again.
   if (block.kind === 'user') {
-var kill = document.createElement('span')
-Object.assign(kill.style, BOARD_UI.blockKill)
-kill.className = 'dshv-goal-x'
-kill.setAttribute('role', 'button')
-kill.setAttribute('data-role', 'goalRemove')
-kill.setAttribute('title', paletteText('boardGoalRemove'))
-kill.textContent = '×'
-kill.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  removeBoardGoal(block)
-})
-head.appendChild(kill)
+    var kill = document.createElement('span')
+    Object.assign(kill.style, BOARD_UI.blockKill)
+    kill.className = 'dshv-goal-x'
+    kill.setAttribute('role', 'button')
+    kill.setAttribute('data-role', 'goalRemove')
+    kill.setAttribute('title', paletteText('boardGoalRemove'))
+    kill.textContent = '×'
+    kill.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      removeBoardGoal(block)
+    })
+    head.appendChild(kill)
   }
   node.appendChild(head)
   // The wheel stands on the paper rather than inside the panel: a panel
@@ -818,18 +843,18 @@ head.appendChild(kill)
   // still the panel's - the press that opened it is on that heading - so it
   // is drawn at the panel's own corner and put away with it.
   if (hue !== null && BOARD.seatMenu === block.key) {
-var wheel = buildSeatMenu(block)
-wheel.style.left = (place.x + 10) + 'px'
-wheel.style.top = (place.y + BOARD_BLOCK_HEAD_H - 4) + 'px'
-BOARD.stage.appendChild(wheel)
+    var wheel = buildSeatMenu(block)
+    wheel.style.left = (place.x + 10) + 'px'
+    wheel.style.top = (place.y + BOARD_BLOCK_HEAD_H - 4) + 'px'
+    BOARD.stage.appendChild(wheel)
   }
   // A paint can land while the ⋯ menu is open - a feed tick, a landed
   // turn count - and the menu belongs to the page, not to the press that
   // happened to open it.
   if (BOARD.goalMenu === block.key) {
-var standingMenu = buildGoalMenu(block)
-placeGoalMenu(standingMenu, block, place)
-BOARD.stage.appendChild(standingMenu)
+    var standingMenu = buildGoalMenu(block)
+    placeGoalMenu(standingMenu, block, place)
+    BOARD.stage.appendChild(standingMenu)
   }
 
   // What the goal is for, in the reader's own words.
@@ -848,87 +873,91 @@ BOARD.stage.appendChild(standingMenu)
   mark.textContent = '🎯'
   purpose.appendChild(mark)
   if (BOARD.intentBlock === block.key) {
-var field = document.createElement('input')
-Object.assign(field.style, BOARD_UI.blockIntentBox)
-field.setAttribute('type', 'text')
-field.setAttribute('data-role', 'blockIntentField')
-field.setAttribute('data-no-drag', 'true')
-field.setAttribute('aria-label', paletteText('boardGoalIntent'))
-field.setAttribute('placeholder', paletteText('boardGoalIntentPlaceholder'))
-field.value = block.intent || ''
-field.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') {
-    ev.preventDefault()
-    commitGoalIntent()
-  } else if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelGoalIntent()
-  }
-})
-field.addEventListener('blur', function () {
-  if (BOARD.intentBlock === block.key && BOARD.intentInput === field) commitGoalIntent()
-})
-BOARD.intentInput = field
-purpose.appendChild(field)
+    var field = document.createElement('input')
+    Object.assign(field.style, BOARD_UI.blockIntentBox)
+    field.setAttribute('type', 'text')
+    field.setAttribute('data-role', 'blockIntentField')
+    field.setAttribute('data-no-drag', 'true')
+    field.setAttribute('aria-label', paletteText('boardGoalIntent'))
+    field.setAttribute('placeholder', paletteText('boardGoalIntentPlaceholder'))
+    field.value = block.intent || ''
+    field.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        commitGoalIntent()
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelGoalIntent()
+      }
+    })
+    field.addEventListener('blur', function () {
+      if (BOARD.intentBlock === block.key && BOARD.intentInput === field) commitGoalIntent()
+    })
+    BOARD.intentInput = field
+    purpose.appendChild(field)
   } else {
-var said = document.createElement('span')
-Object.assign(said.style, block.intent ? BOARD_UI.blockIntentText : BOARD_UI.blockIntentEmpty)
-said.className = 'dshv-intent-text'
-said.setAttribute('data-role', 'blockIntentText')
-said.textContent = block.intent || paletteText('boardGoalIntentPlaceholder')
-said.setAttribute('title', paletteText('boardGoalIntentHint'))
-said.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  beginGoalIntent(block.key)
-})
-purpose.appendChild(said)
+    var said = document.createElement('span')
+    Object.assign(said.style, block.intent ? BOARD_UI.blockIntentText : BOARD_UI.blockIntentEmpty)
+    said.className = 'dshv-intent-text'
+    said.setAttribute('data-role', 'blockIntentText')
+    said.textContent = block.intent || paletteText('boardGoalIntentPlaceholder')
+    said.setAttribute('title', paletteText('boardGoalIntentHint'))
+    said.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      beginGoalIntent(block.key)
+    })
+    purpose.appendChild(said)
   }
   // Where the panel came from, when its name no longer says so. A workspace
   // panel still wearing its workspace's name has nothing to add; one renamed
   // to what the reader is doing there owes the reader the source.
   if (block.kind === 'workspace' && block.path && goalBaseName(block.path) !== block.label) {
-var source = document.createElement('span')
-Object.assign(source.style, BOARD_UI.blockIntentFrom)
-source.setAttribute('data-role', 'blockGoalFrom')
-source.textContent = goalBaseName(block.path)
-source.setAttribute('title', block.path)
-purpose.appendChild(source)
+    var source = document.createElement('span')
+    Object.assign(source.style, BOARD_UI.blockIntentFrom)
+    source.setAttribute('data-role', 'blockGoalFrom')
+    source.textContent = goalBaseName(block.path)
+    source.setAttribute('title', block.path)
+    purpose.appendChild(source)
   }
   // The inbox is the place for what no workspace claimed, not a plan of
   // its own: a line saying what it is for would be a line about nothing.
   if (block.kind !== 'inbox') node.appendChild(purpose)
 
   if (!folded) {
-var body = document.createElement('div')
-Object.assign(body.style, block.kind === 'inbox' ? BOARD_UI.blockBody : BOARD_UI.blockRow)
-body.setAttribute('data-role', 'blockBody')
-if (block.kind === 'inbox') {
-  // The tray is not a goal: it holds the conversations that have no home
-  // yet *and* the notes that were put away in it, so it has a body of its
-  // own rather than the column a goal draws. It is drawn whether or not
-  // it holds a conversation - a note put away in an otherwise empty tray
-  // is still there, and this body is the only place it is drawn.
-  body.appendChild(buildInboxBody(block, titles))
-} else if (!block.rows.length) {
-  var empty = document.createElement('div')
-  Object.assign(empty.style, BOARD_UI.empty)
-  empty.textContent = paletteText('boardEmptyInbox')
-  body.appendChild(empty)
-} else {
-  body.appendChild(buildBoardColumns(block, titles))
-}
-node.appendChild(body)
-// What the reader finished today, at the very foot of the place it was
-// finished in. The tray has one too: a finished conversation is
-// finished wherever it was waiting, and a strip that existed on every
-// panel but one would be a rule the reader has to remember an exception
-// to.
-node.appendChild(buildDoneBar(block, titles))
+    var body = document.createElement('div')
+    Object.assign(body.style, block.kind === 'inbox' ? BOARD_UI.blockBody : BOARD_UI.blockRow)
+    body.setAttribute('data-role', 'blockBody')
+    if (block.kind === 'inbox') {
+      // The tray is not a goal: it holds the conversations that have no home
+      // yet *and* the notes that were put away in it, so it has a body of its
+      // own rather than the column a goal draws. It is drawn whether or not
+      // it holds a conversation - a note put away in an otherwise empty tray
+      // is still there, and this body is the only place it is drawn.
+      body.appendChild(buildInboxBody(block, titles))
+    } else if (!block.rows.length) {
+      var empty = document.createElement('div')
+      Object.assign(empty.style, BOARD_UI.empty)
+      empty.textContent = paletteText('boardEmptyInbox')
+      body.appendChild(empty)
+    } else {
+      body.appendChild(buildBoardColumns(block, titles))
+    }
+    node.appendChild(body)
+    // The reader's own half of the goal, under the agents' work: one row
+    // that takes thought cards. The tray has its own body for the same job,
+    // so it wears no second one.
+    if (block.kind !== 'inbox') node.appendChild(buildGoalLane(block, titles))
+    // What the reader finished today, at the very foot of the place it was
+    // finished in. The tray has one too: a finished conversation is
+    // finished wherever it was waiting, and a strip that existed on every
+    // panel but one would be a rule the reader has to remember an exception
+    // to.
+    node.appendChild(buildDoneBar(block, titles))
   }
   return node
 }
@@ -1424,30 +1453,74 @@ function buildInboxBody(block, titles) {
   // a card nobody draws is a card the reader has lost, and the tray is the
   // one place that can always show it.
   var notes = BOARD_STORE.filedCards(BOARD_INBOX)
+  // A card filed in a goal's own lane is drawn there, under that goal. The
+  // tray keeps only what this paint cannot place - the homeless, and the
+  // filings of a build this one cannot draw.
+  var drawn = Object.create(null)
+  for (var d = 0; d < BOARD.blocks.length; d++) drawn[BOARD.blocks[d].key] = true
   var every = BOARD_STORE.cards()
   for (var f = 0; f < every.length; f++) {
-var held = every[f]
-if (!held.filed || held.filed === BOARD_INBOX || held.filed === BOARD_DONE) continue
-notes.push(held)
+    var held = every[f]
+    if (!held.filed || held.filed === BOARD_INBOX || held.filed === BOARD_DONE) continue
+    if (drawn[held.filed]) continue
+    notes.push(held)
   }
   // The tray counts the same thing a goal's heading does: what it is showing as
   // columns. The quiet ones are their own line, told apart underneath.
   wrap.appendChild(trayCaption(paletteText('boardInboxSessions'),
-block.hot ? block.hot.length : block.rows.length))
+    block.hot ? block.hot.length : block.rows.length))
   if (!block.rows.length) {
-wrap.appendChild(trayQuiet(paletteText('boardEmptyInbox')))
+    wrap.appendChild(trayQuiet(paletteText('boardEmptyInbox')))
   } else {
-var columns = buildBoardColumns(block, titles)
-// Every conversation in the tray wears the ideas' paper. The walk is here
-// rather than in the builder because it is the tray's fact, not a card's:
-// the same card dropped into a goal goes back to the goal's own ink.
-trayInk(columns)
-wrap.appendChild(columns)
+    var columns = buildBoardColumns(block, titles)
+    // Every conversation in the tray wears the ideas' paper. The walk is here
+    // rather than in the builder because it is the tray's fact, not a card's:
+    // the same card dropped into a goal goes back to the goal's own ink.
+    trayInk(columns)
+    wrap.appendChild(columns)
   }
   wrap.appendChild(trayCaption(paletteText('boardInboxNotes'), notes.length))
   if (!notes.length) wrap.appendChild(trayQuiet(paletteText('boardEmptyTrayIdeas')))
   for (var i = 0; i < notes.length; i++) wrap.appendChild(buildTrayNote(notes[i], titles))
   return wrap
+}
+
+/**
+ * The lane at the foot of one goal: what the reader did about it themselves.
+ *
+ * A goal is mostly conversations with an agent, but the reader's own part -
+ * the check they ran, the person they asked, the thing they will do after
+ * lunch - has no conversation to live in. This row is where a thought about
+ * that part is kept: dragging a card into it files the card there, and the
+ * card is read as a line under the goal rather than as paper on the canvas.
+ *
+ * It is the same tray the inbox has always drawn, one per goal. That is the
+ * whole of what "merging the inbox into the goals" means here: the inbox is
+ * no longer a kind of card, it is the goal whose lane takes what belongs
+ * nowhere.
+ * @param {object} block - the goal.
+ * @param {object} titles - session id -> the name to call it by.
+ * @returns {Element} the lane.
+ */
+function buildGoalLane(block, titles) {
+  var lane = document.createElement('div')
+  Object.assign(lane.style, BOARD_UI.lane)
+  lane.className = 'dshv-lane'
+  lane.setAttribute('data-role', 'goalLane')
+  lane.setAttribute('data-handle', 'lane')
+  lane.setAttribute('data-block', block.key)
+  var notes = BOARD_STORE.filedCards(block.key)
+  lane.appendChild(trayCaption(paletteText('boardLaneHuman'), notes.length))
+  if (!notes.length) {
+    var empty = document.createElement('div')
+    Object.assign(empty.style, BOARD_UI.laneEmpty)
+    empty.setAttribute('data-role', 'laneEmpty')
+    empty.textContent = paletteText('boardLaneEmpty')
+    lane.appendChild(empty)
+    return lane
+  }
+  for (var i = 0; i < notes.length; i++) lane.appendChild(buildTrayNote(notes[i], titles))
+  return lane
 }
 
 /**
@@ -1887,9 +1960,9 @@ function verdictText(key) {
 function buildVerdictChip(summary, verdict) {
   var chip = document.createElement('span')
   Object.assign(
-chip.style,
-BOARD_UI.cardChip,
-BOARD_UI['cardChip' + verdict.key.charAt(0).toUpperCase() + verdict.key.slice(1)]
+    chip.style,
+    BOARD_UI.cardChip,
+    BOARD_UI['cardChip' + verdict.key.charAt(0).toUpperCase() + verdict.key.slice(1)]
   )
   chip.className = 'dshv-chip'
   chip.setAttribute('role', 'button')
@@ -1906,10 +1979,11 @@ BOARD_UI['cardChip' + verdict.key.charAt(0).toUpperCase() + verdict.key.slice(1)
 /**
  * The empty seat, for a card the shell has nothing to say about.
  *
- * A faint plus, not nothing: the reader has to be able to find the place
- * before they know they want it.
+ * The words, not a plus: a plus says "something can go here" and leaves the
+ * reader guessing what, while "任务状态" says exactly what the seat is for.
+ * It is still the way in - a press offers the two words the reader can give.
  * @param {object} summary - the conversation.
- * @returns {Element} the plus.
+ * @returns {Element} the seat.
  */
 function buildStateAdd(summary) {
   var add = document.createElement('span')
@@ -1921,7 +1995,7 @@ function buildStateAdd(summary) {
   add.setAttribute('title', paletteText('cardStateHint'))
   add.setAttribute('aria-label', paletteText('cardStateHint'))
   add.setAttribute('aria-expanded', BOARD.verdictMenu === summary.id ? 'true' : 'false')
-  add.textContent = '+'
+  add.textContent = paletteText('boardTaskState')
   add.addEventListener('click', stateToggle(summary.id))
   return add
 }
@@ -2034,9 +2108,9 @@ function buildBoardCard(summary, orphan, titles, hue, opts) {
   // read - and not a second hue, because a card that is its own colour is a
   // card that belongs nowhere.
   if (hue !== null && hue !== undefined) {
-card.style.background = 'hsl(' + hue + ' 48% 50% / 0.10)'
-card.style.borderColor = 'hsl(' + hue + ' 40% 45% / 0.22)'
-card.style.borderLeft = '3px solid hsl(' + hue + ' 55% 46% / 0.72)'
+    card.style.background = solidPaper('hsl(' + hue + ' 48% 50% / 0.10)', BOARD_INK.card)
+    card.style.borderColor = 'hsl(' + hue + ' 40% 45% / 0.22)'
+    card.style.borderLeft = '3px solid hsl(' + hue + ' 55% 46% / 0.72)'
   }
   card.className = 'dshv-card'
   card.setAttribute('data-session-id', summary.id)
@@ -2049,13 +2123,13 @@ card.style.borderLeft = '3px solid hsl(' + hue + ' 55% 46% / 0.72)'
   // this card stops its own press before it reaches here - so what arrives
   // at this handler is, by construction, a press on the conversation.
   card.addEventListener('click', function () {
-// A click that follows a carry is the gesture's leftover, not a request:
-// the same one-shot guard the marks use, in one place instead of five.
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-boardOpenSession(summary.id, { anchor: true })
+    // A click that follows a carry is the gesture's leftover, not a request:
+    // the same one-shot guard the marks use, in one place instead of five.
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    boardOpenSession(summary.id, { anchor: true })
   })
   var status = statusOf(summary)
   // The shell has nothing to say about this one, so the card says what it
@@ -2065,16 +2139,16 @@ boardOpenSession(summary.id, { anchor: true })
   // flight wears a ring that breathes, one parked on the reader wears a still
   // ring, and a completion nobody has looked at yet gets one beat.
   if (statusIsLive(status)) {
-card.setAttribute('data-live', 'true')
-// Waiting is not working. The same turn parked on a question or an
-// approval must not look like something moving without the reader.
-if (status.key === 'pending') card.setAttribute('data-waiting', 'true')
+    card.setAttribute('data-live', 'true')
+    // Waiting is not working. The same turn parked on a question or an
+    // approval must not look like something moving without the reader.
+    if (status.key === 'pending') card.setAttribute('data-waiting', 'true')
   }
   if (status && status.key === 'done') markCardFresh(card, summary.id)
   else if (BOARD.freshed[summary.id]) delete BOARD.freshed[summary.id]
   if (BOARD.front === summary.id) {
-card.setAttribute('data-front', 'true')
-card.style.zIndex = String(BOARD.zTop)
+    card.setAttribute('data-front', 'true')
+    card.style.zIndex = String(BOARD.zTop)
   }
 
   // Four fifths what the card says, one fifth what can be done with it. The
@@ -2084,183 +2158,217 @@ card.style.zIndex = String(BOARD.zTop)
   Object.assign(row.style, BOARD_UI.cardRow)
   var main = document.createElement('div')
   Object.assign(main.style, BOARD_UI.cardMain)
+  // The marks stand in a rail on the card's right edge: three rows of two
+  // seats, always six, so every card is the same shape and no mark moves
+  // between cards. A mark with nothing to say keeps its seat and hides.
+  var rail = document.createElement('div')
+  Object.assign(rail.style, BOARD_UI.cardRail)
+  rail.className = 'dshv-card-rail'
+  rail.setAttribute('data-role', 'cardRail')
+  /** Put one mark in the next seat, or leave the seat empty. */
+  function railSeat(mark) {
+    var seat = document.createElement('span')
+    Object.assign(seat.style, mark ? BOARD_UI.cardSlot : BOARD_UI.cardSlotOff)
+    seat.setAttribute('data-role', 'cardSlot')
+    if (mark) {
+      mark.setAttribute('data-slot', 'true')
+      seat.appendChild(mark)
+    }
+    rail.appendChild(seat)
+    return seat
+  }
 
   if (BOARD.renamingCard === summary.id) {
-var field = document.createElement('input')
-Object.assign(field.style, BOARD_UI.cardRenameBox)
-field.setAttribute('type', 'text')
-field.setAttribute('data-role', 'cardRename')
-field.setAttribute('aria-label', paletteText('rename'))
-field.setAttribute('data-no-drag', 'true')
-field.value = BOARD.renameCardDraft === null ? name : BOARD.renameCardDraft
-field.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') {
-    ev.preventDefault()
-    commitBoardRename()
-  } else if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelBoardRename()
-  }
-})
-field.addEventListener('blur', function () {
-  if (BOARD.renamingCard === summary.id && BOARD.renameCardInput === field) commitBoardRename()
-})
-field.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-})
-main.appendChild(field)
-BOARD.renameCardInput = field
+    var field = document.createElement('input')
+    Object.assign(field.style, BOARD_UI.cardRenameBox)
+    field.setAttribute('type', 'text')
+    field.setAttribute('data-role', 'cardRename')
+    field.setAttribute('aria-label', paletteText('rename'))
+    field.setAttribute('data-no-drag', 'true')
+    field.value = BOARD.renameCardDraft === null ? name : BOARD.renameCardDraft
+    field.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        commitBoardRename()
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelBoardRename()
+      }
+    })
+    field.addEventListener('blur', function () {
+      if (BOARD.renamingCard === summary.id && BOARD.renameCardInput === field) commitBoardRename()
+    })
+    field.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    })
+    main.appendChild(field)
+    BOARD.renameCardInput = field
   } else {
-// The name is a label. A press on it is a press on the conversation and
-// opens it, like the rest of the card; renaming has a target of its own
-// at the end of this line, so a press meant for the conversation can
-// never land in a field.
-var title = document.createElement('div')
-Object.assign(title.style, BOARD_UI.cardTitle)
-title.setAttribute('data-role', 'cardTitle')
-title.textContent = name
-// The name and the lock share one line: a fixed title is a fact about
-// the work, and it belongs beside the words it holds down.
-var titleRow = document.createElement('div')
-Object.assign(titleRow.style, BOARD_UI.cardTitleRow)
-title.style.flex = '1 1 auto'
-title.style.minWidth = '0'
-titleRow.appendChild(title)
-var locked = BOARD_STORE.isSessionLocked(summary.id)
-var lockMark = document.createElement('span')
-Object.assign(lockMark.style, locked ? BOARD_UI.cardLockOn : BOARD_UI.cardLock)
-lockMark.className = 'dshv-lock'
-lockMark.setAttribute('role', 'button')
-lockMark.setAttribute('data-role', 'cardLock')
-lockMark.setAttribute('aria-pressed', locked ? 'true' : 'false')
-lockMark.setAttribute('title', paletteText(locked ? 'boardCardUnlockHint' : 'boardCardLockHint'))
-lockMark.setAttribute('aria-label', paletteText(locked ? 'boardCardUnlockHint' : 'boardCardLockHint'))
-lockMark.appendChild(boardIcon(locked ? 'lock' : 'unlock', 12))
-lockMark.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
+    // The name is a label. A press on it is a press on the conversation and
+    // opens it, like the rest of the card; renaming has a target of its own
+    // at the end of this line, so a press meant for the conversation can
+    // never land in a field.
+    var title = document.createElement('div')
+    Object.assign(title.style, BOARD_UI.cardTitle)
+    title.setAttribute('data-role', 'cardTitle')
+    title.textContent = name
+    // The name and the lock share one line: a fixed title is a fact about
+    // the work, and it belongs beside the words it holds down.
+    var titleRow = document.createElement('div')
+    Object.assign(titleRow.style, BOARD_UI.cardTitleRow)
+    title.style.flex = '1 1 auto'
+    title.style.minWidth = '0'
+    titleRow.appendChild(title)
+    var locked = BOARD_STORE.isSessionLocked(summary.id)
+    var lockMark = document.createElement('span')
+    Object.assign(lockMark.style, locked ? BOARD_UI.cardLockOn : BOARD_UI.cardLock)
+    lockMark.className = 'dshv-lock'
+    lockMark.setAttribute('role', 'button')
+    lockMark.setAttribute('data-role', 'cardLock')
+    lockMark.setAttribute('aria-pressed', locked ? 'true' : 'false')
+    lockMark.setAttribute('title', paletteText(locked ? 'boardCardUnlockHint' : 'boardCardLockHint'))
+    lockMark.setAttribute('aria-label', paletteText(locked ? 'boardCardUnlockHint' : 'boardCardLockHint'))
+    lockMark.appendChild(boardIcon(locked ? 'lock' : 'unlock', 12))
+    lockMark.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      BOARD_STORE.toggleSessionLock(summary.id)
+      renderBoard()
+    })
+    railSeat(lockMark)
+    // Renaming is a host write on the conversation, and the board names one
+    // from the thought that started it: the rare verb belongs behind the ⋯
+    // at the end of this line, not on it. The lock keeps its own seat beside
+    // the name it holds down, and no word stands over the two of them.
+    var moreMark = document.createElement('span')
+    Object.assign(moreMark.style, BOARD_UI.cardMore)
+    moreMark.className = 'dshv-card-more'
+    moreMark.setAttribute('role', 'button')
+    moreMark.setAttribute('data-role', 'cardMenuOpen')
+    moreMark.setAttribute('title', paletteText('boardCardMenu'))
+    moreMark.setAttribute('aria-label', paletteText('boardCardMenu'))
+    moreMark.setAttribute('aria-expanded', BOARD.sessionMenu === summary.id ? 'true' : 'false')
+    moreMark.textContent = '\u22ef'
+    moreMark.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      // Opening a menu is not a repaint: the board may be mid-field, and a
+      // paint would take the card out from under the press that asked.
+      if (BOARD.sessionMenu === summary.id) {
+        closeSessionMenu()
+        return
+      }
+      closeIdeaMenu()
+      closeSessionMenu()
+      closeGoalMenu()
+      BOARD.sessionMenu = summary.id
+      BOARD.sessionMenuMark = moreMark
+      moreMark.setAttribute('aria-expanded', 'true')
+      var opened = buildSessionMenu(summary, !!(opts && opts.done))
+      card.appendChild(opened)
+      placeCardMenu(opened, moreMark)
+    })
+    railSeat(moreMark)
+    main.appendChild(titleRow)
+    if (BOARD.sessionMenu === summary.id) {
+      var standing = buildSessionMenu(summary, !!(opts && opts.done))
+      card.appendChild(standing)
+      placeCardMenu(standing, moreMark)
+    }
   }
-  BOARD_STORE.toggleSessionLock(summary.id)
-  renderBoard()
-})
-titleRow.appendChild(lockMark)
-// Renaming is a host write on the conversation, and the board names one
-// from the thought that started it: the rare verb belongs behind the ⋯
-// at the end of this line, not on it. The lock keeps its own seat beside
-// the name it holds down, and no word stands over the two of them.
-var moreMark = document.createElement('span')
-Object.assign(moreMark.style, BOARD_UI.cardMore)
-moreMark.className = 'dshv-card-more'
-moreMark.setAttribute('role', 'button')
-moreMark.setAttribute('data-role', 'cardMenuOpen')
-moreMark.setAttribute('title', paletteText('boardCardMenu'))
-moreMark.setAttribute('aria-label', paletteText('boardCardMenu'))
-moreMark.setAttribute('aria-expanded', BOARD.sessionMenu === summary.id ? 'true' : 'false')
-moreMark.textContent = '\u22ef'
-moreMark.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
+
+  // What the reader last said to this conversation: the line under the
+  // name, above what it is doing. The name says which conversation it is;
+  // this says what it is about, and the two are different facts that keep
+  // different rows. The height is the second line the name used to reserve
+  // and leave empty, so nothing on the card grows for it.
+  var saidText = SAID.known(summary)
+  var saidLine = document.createElement('div')
+  Object.assign(saidLine.style, BOARD_UI.cardSaid)
+  saidLine.setAttribute('data-role', 'cardSaid')
+  if (typeof saidText === 'string' && saidText !== '') {
+    saidLine.textContent = saidText
+    saidLine.setAttribute('title', saidText)
   }
-  // Opening a menu is not a repaint: the board may be mid-field, and a
-  // paint would take the card out from under the press that asked.
-  if (BOARD.sessionMenu === summary.id) {
-    closeSessionMenu()
-    return
-  }
-  closeIdeaMenu()
-  closeSessionMenu()
-  closeGoalMenu()
-  BOARD.sessionMenu = summary.id
-  BOARD.sessionMenuMark = moreMark
-  moreMark.setAttribute('aria-expanded', 'true')
-  var opened = buildSessionMenu(summary, !!(opts && opts.done))
-  card.appendChild(opened)
-  placeCardMenu(opened, moreMark)
-})
-titleRow.appendChild(moreMark)
-main.appendChild(titleRow)
-if (BOARD.sessionMenu === summary.id) {
-  var standing = buildSessionMenu(summary, !!(opts && opts.done))
-  card.appendChild(standing)
-  placeCardMenu(standing, moreMark)
-}
-  }
+  main.appendChild(saidLine)
 
   // Where a line would run off the panel, the card says in words where the
   // branch came from: the parent is real and named, it is simply not here
   // today. Pressing it opens that conversation.
   if (orphan) {
-var source = document.createElement('div')
-Object.assign(source.style, BOARD_UI.forkSource)
-source.setAttribute('data-role', 'forkSource')
-var parentTitle = titles[orphan]
-if (parentTitle) {
-  source.textContent = paletteText('boardForkSource') + parentTitle
-  source.setAttribute('title', paletteText('boardForkSource') + parentTitle)
-  source.style.cursor = 'pointer'
-  source.addEventListener('click', function (ev) {
-    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    boardOpenSession(orphan, { anchor: true })
-  })
-} else {
-  source.textContent = paletteText('boardForkSourceUnknown')
-}
-main.appendChild(source)
+    var source = document.createElement('div')
+    Object.assign(source.style, BOARD_UI.forkSource)
+    source.setAttribute('data-role', 'forkSource')
+    var parentTitle = titles[orphan]
+    if (parentTitle) {
+      source.textContent = paletteText('boardForkSource') + parentTitle
+      source.setAttribute('title', paletteText('boardForkSource') + parentTitle)
+      source.style.cursor = 'pointer'
+      source.addEventListener('click', function (ev) {
+        if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        boardOpenSession(orphan, { anchor: true })
+      })
+    } else {
+      source.textContent = paletteText('boardForkSourceUnknown')
+    }
+    main.appendChild(source)
   }
 
   // What this conversation has been told, read once for both the line it
   // is drawn as and the mark that offers to start one.
   var pinned = NOTE_STORE.get(summary.id)
   if (BOARD.noteEditing === summary.id) {
-var editor = document.createElement('input')
-Object.assign(editor.style, BOARD_UI.cardNoteBox)
-editor.setAttribute('type', 'text')
-editor.setAttribute('data-role', 'cardNoteBox')
-editor.setAttribute('aria-label', paletteText('notePlaceholder'))
-editor.setAttribute('data-no-drag', 'true')
-editor.setAttribute('placeholder', paletteText('notePlaceholder'))
-editor.value = pinned
-editor.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') {
-    ev.preventDefault()
-    commitBoardNote()
-  } else if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelBoardNote()
-  }
-})
-// A press elsewhere keeps what was typed: a note is a thought already
-// had, and losing it because the reader looked away is the one failure
-// this cannot afford.
-editor.addEventListener('blur', function () {
-  if (BOARD.noteEditing === summary.id && BOARD.noteEditor === editor) commitBoardNote()
-})
-editor.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-})
-main.appendChild(editor)
-BOARD.noteEditor = editor
+    var editor = document.createElement('input')
+    Object.assign(editor.style, BOARD_UI.cardNoteBox)
+    editor.setAttribute('type', 'text')
+    editor.setAttribute('data-role', 'cardNoteBox')
+    editor.setAttribute('aria-label', paletteText('notePlaceholder'))
+    editor.setAttribute('data-no-drag', 'true')
+    editor.setAttribute('placeholder', paletteText('notePlaceholder'))
+    editor.value = pinned
+    editor.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        commitBoardNote()
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelBoardNote()
+      }
+    })
+    // A press elsewhere keeps what was typed: a note is a thought already
+    // had, and losing it because the reader looked away is the one failure
+    // this cannot afford.
+    editor.addEventListener('blur', function () {
+      if (BOARD.noteEditing === summary.id && BOARD.noteEditor === editor) commitBoardNote()
+    })
+    editor.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    })
+    main.appendChild(editor)
+    BOARD.noteEditor = editor
   } else if (pinned) {
-var noteLine = document.createElement('div')
-Object.assign(noteLine.style, BOARD_UI.cardNote)
-noteLine.setAttribute('data-role', 'note')
-noteLine.setAttribute('title', paletteText('noteEdit'))
-noteLine.textContent = pinned
-noteLine.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  beginBoardNote(summary.id)
-})
-main.appendChild(noteLine)
+    var noteLine = document.createElement('div')
+    Object.assign(noteLine.style, BOARD_UI.cardNote)
+    noteLine.setAttribute('data-role', 'note')
+    noteLine.setAttribute('title', paletteText('noteEdit'))
+    noteLine.textContent = pinned
+    noteLine.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      beginBoardNote(summary.id)
+    })
+    main.appendChild(noteLine)
   }
 
   var stateAnchored = null
@@ -2273,79 +2381,80 @@ main.appendChild(noteLine)
   // meant for this line, not a request to leave the board. The upper part
   // of the card stays the way in; this line never is.
   meta.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) BOARD.dragged = false
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) BOARD.dragged = false
   })
   // The state chip leads the meta line, the seat it holds on the task
   // window's rows: the eye reads what the conversation is doing before it
   // reads which conversation it is. The clock rides in the chip exactly as
   // it does there, updated in place by the board's own tick.
   if (status) {
-var chip = document.createElement('span')
-Object.assign(
-  chip.style,
-  BOARD_UI.cardChip,
-  BOARD_UI['cardChip' + status.key[0].toUpperCase() + status.key.slice(1)]
-)
-chip.setAttribute('data-role', 'status')
-chip.className = 'dshv-chip'
-if (statusIsLive(status)) chip.setAttribute('data-live', 'true')
-if (status.key === 'pending') chip.setAttribute('data-waiting', 'true')
-var since = statusIsLive(status) ? runSince(summary.id) : 0
-var elapsed = since ? elapsedText(Date.now() - since) : ''
-chip.textContent = elapsed ? status.text + ' · ' + elapsed : status.text
-chip.setAttribute('title', elapsed ? paletteText('elapsedFor') + ' ' + elapsed : status.text)
-meta.appendChild(chip)
-if (since) BOARD.clocks.push({ chip: chip, label: status.text, since: since })
+    var chip = document.createElement('span')
+    Object.assign(
+      chip.style,
+      BOARD_UI.cardChip,
+      BOARD_UI['cardChip' + status.key[0].toUpperCase() + status.key.slice(1)]
+    )
+    chip.setAttribute('data-role', 'status')
+    chip.className = 'dshv-chip'
+    if (statusIsLive(status)) chip.setAttribute('data-live', 'true')
+    if (status.key === 'pending') chip.setAttribute('data-waiting', 'true')
+    var since = statusIsLive(status) ? runSince(summary.id) : 0
+    var elapsed = since ? elapsedText(Date.now() - since) : ''
+    chip.textContent = elapsed ? status.text + ' · ' + elapsed : status.text
+    chip.setAttribute('title', elapsed ? paletteText('elapsedFor') + ' ' + elapsed : status.text)
+    meta.appendChild(chip)
+    if (since) BOARD.clocks.push({ chip: chip, label: status.text, since: since })
   } else if (verdict) {
-var stateChip = buildVerdictChip(summary, verdict)
-meta.appendChild(stateChip)
-stateAnchored = stateChip
+    var stateChip = buildVerdictChip(summary, verdict)
+    meta.appendChild(stateChip)
+    stateAnchored = stateChip
   } else {
-var stateAdd = buildStateAdd(summary)
-meta.appendChild(stateAdd)
-stateAnchored = stateAdd
+    var stateAdd = buildStateAdd(summary)
+    meta.appendChild(stateAdd)
+    stateAnchored = stateAdd
   }
   // A conversation that came in from the last page says so, and for how
   // long. The reader asked for it not to vanish overnight; a card that
   // outlived the day in silence would be the same surprise read backwards.
   var carriedFor = CARRY.days(summary.id, dayOf(Date.now()))
   if (carriedFor > 0) {
-var carriedMark = document.createElement('span')
-Object.assign(carriedMark.style, BOARD_UI.cardCarried)
-carriedMark.setAttribute('data-role', 'carried')
-carriedMark.setAttribute('title', paletteText('boardHistoryCarriedHint'))
-carriedMark.textContent = paletteText('boardHistoryCarried') + carriedFor
-  + paletteText('boardHistoryCarriedUnit')
-meta.appendChild(carriedMark)
+    var carriedMark = document.createElement('span')
+    Object.assign(carriedMark.style, BOARD_UI.cardCarried)
+    carriedMark.setAttribute('data-role', 'carried')
+    carriedMark.setAttribute('title', paletteText('boardHistoryCarriedHint'))
+    carriedMark.textContent = paletteText('boardHistoryCarried') + carriedFor
+      + paletteText('boardHistoryCarriedUnit')
+    meta.appendChild(carriedMark)
   }
 
   // What was handed to this conversation, put away: the mark only exists
   // when it holds something, because a card's own line has no room to spare
   // for a door that opens on nothing.
   var archived = doneBinCardsOf(summary.id).length
+  var archiveMark = null
   if (archived) {
-var archive = document.createElement('span')
-Object.assign(archive.style, BOARD_UI.cardArchive)
-archive.className = 'dshv-archive'
-archive.setAttribute('role', 'button')
-archive.setAttribute('data-role', 'cardArchive')
-archive.setAttribute('title', paletteText('boardDoneBinHint'))
-archive.setAttribute('aria-label', paletteText('boardDoneBinHint'))
-archive.appendChild(boardIcon('archive', 13))
-var archiveCount = document.createElement('span')
-archiveCount.setAttribute('data-role', 'cardArchiveCount')
-archiveCount.textContent = String(archived)
-archive.appendChild(archiveCount)
-archive.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  openDoneBinFor(summary.id)
-})
-meta.appendChild(archive)
+    var archive = document.createElement('span')
+    Object.assign(archive.style, BOARD_UI.cardArchive)
+    archive.className = 'dshv-archive'
+    archive.setAttribute('role', 'button')
+    archive.setAttribute('data-role', 'cardArchive')
+    archive.setAttribute('title', paletteText('boardDoneBinHint'))
+    archive.setAttribute('aria-label', paletteText('boardDoneBinHint'))
+    archive.appendChild(boardIcon('archive', 13))
+    var archiveCount = document.createElement('span')
+    archiveCount.setAttribute('data-role', 'cardArchiveCount')
+    archiveCount.textContent = String(archived)
+    archive.appendChild(archiveCount)
+    archive.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      openDoneBinFor(summary.id)
+    })
+    archiveMark = archive
   }
 
   // Two conversations can honestly wear one name - a workspace's own title
@@ -2355,106 +2464,97 @@ meta.appendChild(archive)
   // card's place among them.
   var dup = BOARD.dupes[summary.id]
   if (dup) {
-var dupTag = document.createElement('span')
-Object.assign(dupTag.style, BOARD_UI.cardDupTag)
-dupTag.setAttribute('data-role', 'cardDupTag')
-dupTag.setAttribute('title', paletteText('boardCardDupHint'))
-dupTag.textContent = '#' + dup.at + '/' + dup.of
-meta.appendChild(dupTag)
+    var dupTag = document.createElement('span')
+    Object.assign(dupTag.style, BOARD_UI.cardDupTag)
+    dupTag.setAttribute('data-role', 'cardDupTag')
+    dupTag.setAttribute('title', paletteText('boardCardDupHint'))
+    dupTag.textContent = '#' + dup.at + '/' + dup.of
+    meta.appendChild(dupTag)
   }
 
-  // The tail is one flex group for the marks that are still worth a seat.
-  var tail = document.createElement('div')
-  Object.assign(tail.style, BOARD_UI.cardTail)
-  // The way in for a card that carries no line yet: a quiet mark before the
-  // other marks.
+  // The foot of the card is the facts, not the verbs: what the conversation
+  // is doing is the line under its name, and the marks that act on it stand
+  // in the rail on its right edge.
+  var pinMark = null
+  // The way in for a card that carries no line yet.
   if (!pinned && BOARD.noteEditing !== summary.id) {
-var pin = document.createElement('span')
-Object.assign(pin.style, BOARD_UI.cardNotePin)
-pin.setAttribute('data-role', 'cardNotePin')
-pin.setAttribute('title', paletteText('boardAddNote'))
-pin.textContent = '✎'
-pin.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
+    pinMark = document.createElement('span')
+    Object.assign(pinMark.style, BOARD_UI.cardNotePin)
+    pinMark.setAttribute('data-role', 'cardNotePin')
+    pinMark.setAttribute('title', paletteText('boardAddNote'))
+    pinMark.textContent = '✎'
+    pinMark.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      beginBoardNote(summary.id)
+    })
   }
-  beginBoardNote(summary.id)
-})
-tail.appendChild(pin)
-  }
-  var star = document.createElement('span')
-  Object.assign(star.style, BOARD_UI.cardStar)
-  star.setAttribute('data-role', 'cardStar')
+  var starMark = document.createElement('span')
+  Object.assign(starMark.style, BOARD_UI.cardStar)
+  starMark.setAttribute('data-role', 'cardStar')
   var marked = BOARD_STORE.isStarred(summary.id)
-  star.setAttribute('aria-pressed', marked ? 'true' : 'false')
-  star.setAttribute('title', paletteText(marked ? 'boardUnstar' : 'boardStar'))
-  star.textContent = marked ? '★' : '☆'
-  if (marked) star.style.color = BOARD_INK.accent
-  star.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-BOARD_STORE.toggleStar(summary.id)
-renderBoard()
+  starMark.setAttribute('aria-pressed', marked ? 'true' : 'false')
+  starMark.setAttribute('title', paletteText(marked ? 'boardUnstar' : 'boardStar'))
+  starMark.textContent = marked ? '★' : '☆'
+  if (marked) starMark.style.color = BOARD_INK.accent
+  starMark.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    BOARD_STORE.toggleStar(summary.id)
+    renderBoard()
   })
-  tail.appendChild(star)
-  // Deleting is taking it off the board, not archiving the conversation:
-  // the shell keeps it, the sidebar keeps it, and it comes back the next
-  // time it is used.
-  var drop = document.createElement('span')
-  Object.assign(drop.style, BOARD_UI.cardRemove)
-  drop.setAttribute('data-role', 'cardRemove')
-  drop.setAttribute('title', paletteText('boardChatRemove'))
-  drop.textContent = '×'
-  drop.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-removeBoardCard(summary)
-  })
-  tail.appendChild(drop)
-  meta.appendChild(tail)
-  main.appendChild(meta)
-
-  // The way to branch, beside the other marks: the card has one row of verbs
-  // at its foot, and a rail of its own is gone with the button that needed it.
-  var fork = document.createElement('span')
-  Object.assign(fork.style, BOARD_UI.cardForkButton)
-  fork.className = 'dshv-fork'
-  fork.setAttribute('role', 'button')
-  fork.setAttribute('data-role', 'cardFork')
-  fork.setAttribute('aria-label', paletteText('boardForkHint'))
-  fork.setAttribute('title', paletteText('boardForkHint'))
-  fork.appendChild(boardIcon('fork', 14))
+  // The way to branch, a seat of its own in the rail.
+  var forkMark = document.createElement('span')
+  Object.assign(forkMark.style, BOARD_UI.cardForkButton)
+  forkMark.className = 'dshv-fork'
+  forkMark.setAttribute('role', 'button')
+  forkMark.setAttribute('data-role', 'cardFork')
+  forkMark.setAttribute('aria-label', paletteText('boardForkHint'))
+  forkMark.setAttribute('title', paletteText('boardForkHint'))
+  forkMark.appendChild(boardIcon('fork', 14))
   // A branch in flight is a branch already being made. The mark stays where
   // it is and stops answering until the host has said what the child is
   // called, so a hand that presses twice out of impatience gets one branch
   // rather than two identical ones.
   if (BOARD.forking[summary.id]) {
-fork.setAttribute('data-busy', 'true')
-fork.setAttribute('aria-busy', 'true')
-fork.setAttribute('title', paletteText('boardForkBusy'))
-fork.setAttribute('aria-label', paletteText('boardForkBusy'))
+    forkMark.setAttribute('data-busy', 'true')
+    forkMark.setAttribute('aria-busy', 'true')
+    forkMark.setAttribute('title', paletteText('boardForkBusy'))
+    forkMark.setAttribute('aria-label', paletteText('boardForkBusy'))
   }
-  fork.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-if (BOARD.forking[summary.id]) return
-forkBoardCard(summary)
+  forkMark.addEventListener('click', function (ev) {
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    if (BOARD.forking[summary.id]) return
+    forkBoardCard(summary)
   })
-  tail.appendChild(fork)
-  meta.appendChild(tail)
-  main.appendChild(meta)
+  // The state is the line under the words - not the last thing on the card:
+  // what the work is doing is the third thing the eye asks, after what it
+  // is and what it was last told. It goes in right under the said line,
+  // above any note or source line.
+  if (typeof main.insertBefore === 'function' && saidLine.nextSibling) {
+    main.insertBefore(meta, saidLine.nextSibling)
+  } else {
+    main.appendChild(meta)
+  }
+  // Six seats in one order, always: the reader learns where a mark lives
+  // once, and it is true on every card. The lock and the ⋯ took the first
+  // two when they were built; these are the rest.
+  railSeat(starMark)
+  railSeat(forkMark)
+  railSeat(pinMark)
+  railSeat(archiveMark)
   row.appendChild(main)
+  row.appendChild(rail)
 
   // The way in is a double press on the card, so the only thing that has to
   // still be a target is a card being carried onto this one: the overlay is
@@ -2479,9 +2579,9 @@ forkBoardCard(summary)
   // The two words stand on the card they belong to, so a press on one is a
   // press inside that card and never a carry of it.
   if (BOARD.verdictMenu === summary.id && stateAnchored) {
-var stateMenu = buildVerdictMenu(summary)
-card.appendChild(stateMenu)
-placeCardMenu(stateMenu, stateAnchored)
+    var stateMenu = buildVerdictMenu(summary)
+    card.appendChild(stateMenu)
+    placeCardMenu(stateMenu, stateAnchored)
   }
 
   BOARD.nodes.push(card)
@@ -2869,33 +2969,38 @@ window.setTimeout(function () {
  * @returns {Promise<string>} the name the branch wears, or '' for unknown.
  */
 function settleBranchName(childId) {
+  // Two titles the board may not touch: the reader turned the switch off,
+  // or locked this one. In both cases the card falls back to saying which
+  // of several same-named branches it is, rather than being renamed.
+  if (settings.autoRename === false) return Promise.resolve('')
+  if (BOARD_STORE.isSessionLocked(childId)) return Promise.resolve('')
   return waitForBranchRow(childId, 24).then(function (child) {
-if (!child) return ''
-var title = String(child.displayTitle || '')
-var taken = Object.create(null)
-var pool = conversationPool()
-var i
-for (i = 0; i < pool.length; i++) {
-  if (pool[i].id === childId) continue
-  taken[String(pool[i].displayTitle || pool[i].id)] = true
-}
-if (!title || !taken[title]) return title
-// The base is the title without the number the host just added, so the
-// child reads as the next of its parent's branches rather than as a
-// fresh series of its own.
-var base = title.replace(/\s*[(\uFF08]\d+[)\uFF09]\s*$/, '') || title
-var n = 1
-while (taken[base + ' (' + n + ')']) n = n + 1
-var next = base + ' (' + n + ')'
-noteCardTitle(childId, next)
-if (BOARD.open) renderBoard()
-renameSession(childId, next, function (reason) {
-  if (reason) console.warn('[dsh-vim] branch rename refused', reason)
-})
-return next
+    if (!child) return ''
+    var title = String(child.displayTitle || '')
+    var taken = Object.create(null)
+    var pool = conversationPool()
+    var i
+    for (i = 0; i < pool.length; i++) {
+      if (pool[i].id === childId) continue
+      taken[String(pool[i].displayTitle || pool[i].id)] = true
+    }
+    if (!title || !taken[title]) return title
+    // The base is the title without the number the host just added, so the
+    // child reads as the next of its parent's branches rather than as a
+    // fresh series of its own.
+    var base = title.replace(/\s*[(\uFF08]\d+[)\uFF09]\s*$/, '') || title
+    var n = 1
+    while (taken[base + ' (' + n + ')']) n = n + 1
+    var next = base + ' (' + n + ')'
+    noteCardTitle(childId, next)
+    if (BOARD.open) renderBoard()
+    renameSession(childId, next, function (reason) {
+      if (reason) console.warn('[dsh-vim] branch rename refused', reason)
+    })
+    return next
   }).then(null, function (error) {
-console.warn('[dsh-vim] branch name could not be settled', error)
-return ''
+    console.warn('[dsh-vim] branch name could not be settled', error)
+    return ''
   })
 }
 
@@ -2913,31 +3018,31 @@ return ''
  */
 function pasteIntoComposer(text, sessionId) {
   return new Promise(function (resolve) {
-var tries = 0
-putInBox()
+    var tries = 0
+    putInBox()
 
-function putInBox() {
-  var root = composerRoot()
-  var here = sessionId ? currentSession() : null
-  var arrived = !sessionId || !here || here.id === sessionId
-  if (!root || !arrived) {
-    if (tries < 24) {
-      tries = tries + 1
-      window.setTimeout(putInBox, 60)
-      return
+    function putInBox() {
+      var root = composerRoot()
+      var here = sessionId ? currentSession() : null
+      var arrived = !sessionId || !here || here.id === sessionId
+      if (!root || !arrived) {
+        if (tries < 24) {
+          tries = tries + 1
+          window.setTimeout(putInBox, 60)
+          return
+        }
+        resolve(false)
+        return
+      }
+      focusComposer()
+      seatCaretAtEnd(root)
+      var already = boxTakesBreak(root, sessionId)
+      var words = already ? BLANK_LINE + text : text
+      Promise.resolve(writeIntoBox(root, words)).then(function (landed) {
+        if (landed) noteBoxWritten(root, sessionId, words)
+        resolve(landed)
+      })
     }
-    resolve(false)
-    return
-  }
-  focusComposer()
-  seatCaretAtEnd(root)
-  var words = boxHasText(root) ? BLANK_LINE + text : text
-  if (putThroughEditor(words)) {
-    resolve(true)
-    return
-  }
-  resolve(pasteThroughEvent(root, words))
-}
   })
 }
 
@@ -2951,6 +3056,112 @@ function composerHasText() {
 
 /** Two line breaks: the blank line Markdown puts between two blocks. */
 var BLANK_LINE = String.fromCharCode(10, 10)
+
+/** How much text a box holds, by whichever reading it answers. */
+function boxLength(root) {
+  if (!root) return 0
+  var words = typeof root.value === 'string' ? root.value : String(root.textContent || '')
+  return words.length
+}
+
+/**
+ * Put words in a box, breaks and all.
+ *
+ * A run with a break in it goes through the editor's own paste: a rich
+ * editor builds its paragraphs from the blocks a paste carries, while the
+ * editing commands can type text but cannot press its Enter - the paragraph
+ * command writes into the DOM under the editor's feet, and an editor that
+ * owns its document drops it, which is how two cards used to arrive glued
+ * together in one paragraph.
+ *
+ * The paste is read back rather than trusted: an editor that ignores the
+ * event leaves the box as it was, and only then is the text typed in, as the
+ * one path this host has been seen to take. The reading waits for the editor
+ * to commit, because a rich editor applies what it was told on its own beat.
+ * @param {Element} root - the editor root.
+ * @param {string} words - what to put in it, breaks included.
+ * @returns {boolean|Promise<boolean>} whether the box took it, answered in
+ *   the same turn when it was typed, and after the editor has committed when
+ *   it was pasted.
+ */
+function writeIntoBox(root, words) {
+  // A box that simply types answers in the same turn: the press that asked
+  // is the press that lands, which is what an editor with no paste of its
+  // own - or a plain textarea - has always done here.
+  if (words.indexOf('\n') === -1) return putThroughEditor(root, words)
+  var before = boxLength(root)
+  if (!pasteThroughEvent(root, words)) return putThroughEditor(root, words)
+  return new Promise(function (resolve) {
+    window.setTimeout(function () {
+      if (boxLength(root) > before) {
+        noteHandoffDiag({ at: Date.now(), how: 'paste', ok: true, after: boxShape(root) })
+        resolve(true)
+        return
+      }
+      noteHandoffDiag({ at: Date.now(), how: 'paste-empty', ok: false, after: boxShape(root) })
+      resolve(putThroughEditor(root, words))
+    }, 0)
+  })
+}
+
+/**
+ * The boxes this plugin has written into, by conversation, and when.
+ *
+ * A rich editor commits on its own beat, so the DOM can still read empty a
+ * moment after the words were taken. The second card of a hand-over must
+ * not be told it is the first just because of that: this is the fact the
+ * separator is decided on, rather than the box's own reading.
+ */
+var HANDOFF_WROTE = Object.create(null)
+
+/** How long our own write counts as words the next card has to follow. */
+var HANDOFF_WROTE_MS = 60 * 1000
+
+/**
+ * Whether a hand-over has to start a block of its own.
+ *
+ * Read off the box first - the reader's own typing is the surest content -
+ * and then off what this plugin itself put there. The second reading is
+ * asked of the editor rather than assumed: our own words still count only
+ * while the box still shows them, so a draft the reader has sent or cleared
+ * does not leave a blank line at the top of the next one.
+ * @param {Element} root - the editor root.
+ * @param {string} sessionId - the conversation the box belongs to.
+ * @returns {boolean} whether a blank line goes first.
+ */
+function boxTakesBreak(root, sessionId) {
+  if (!root) return false
+  if (boxHasText(root)) return true
+  var wrote = HANDOFF_WROTE[sessionId]
+  if (!wrote || wrote.root !== root) return false
+  var said = String(wrote.said || '')
+  if (said && Date.now() - wrote.at < HANDOFF_WROTE_MS && String(root.textContent || '').indexOf(said) >= 0) return true
+  delete HANDOFF_WROTE[sessionId]
+  return false
+}
+
+/**
+ * Note that this plugin has just put words in a conversation's box.
+ *
+ * What is kept is the last line it wrote: that is the part a later hand-over
+ * can look for in the box to tell "still there" from "already sent".
+ * @param {Element} root - the editor root.
+ * @param {string} sessionId - the conversation the box belongs to.
+ * @param {string} words - what was written.
+ * @returns {void}
+ */
+function noteBoxWritten(root, sessionId, words) {
+  if (!root || !sessionId) return
+  var lines = String(words || '').split('\n')
+  var said = ''
+  for (var i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim()) {
+      said = lines[i].trim().slice(0, 40)
+      break
+    }
+  }
+  HANDOFF_WROTE[sessionId] = { root: root, at: Date.now(), said: said }
+}
 
 /**
  * Whether one box already holds words.
@@ -2981,89 +3192,395 @@ function seatCaretAtEnd(root) {
   // A plain textarea answers its own way: a range over its contents is not
   // what moves its caret.
   if (typeof root.setSelectionRange === 'function' && typeof root.value === 'string') {
-try {
-  root.setSelectionRange(root.value.length, root.value.length)
-  return
-} catch (error) {
-  // Fall through to the range, which is what a rich editor wants.
-}
+    try {
+      root.setSelectionRange(root.value.length, root.value.length)
+      return
+    } catch (error) {
+      // Fall through to the range, which is what a rich editor wants.
+    }
   }
   try {
-if (!window.getSelection || typeof document.createRange !== 'function') return
-var range = document.createRange()
-range.selectNodeContents(root)
-range.collapse(false)
-var selection = window.getSelection()
-if (!selection) return
-selection.removeAllRanges()
-selection.addRange(range)
+    if (!window.getSelection || typeof document.createRange !== 'function') return
+    var range = document.createRange()
+    range.selectNodeContents(root)
+    range.collapse(false)
+    var selection = window.getSelection()
+    if (!selection) return
+    selection.removeAllRanges()
+    selection.addRange(range)
   } catch (error) {
-// A host that refuses the range keeps its own caret; the words still land.
+    // A host that refuses the range keeps its own caret; the words still land.
   }
 }
 
 /**
- * Hand one loose card's words to a conversation's message box.
+ * Put the caret at the start of the box's content.
  *
- * Dropping the card opens the conversation first, and its box mounts a
- * moment later, so the paste waits a few frames for it instead of assuming
- * it is there. Both endings are reported, because a card that found no box
- * must not vanish with the thought on it.
- * @param {string} text - what the card says, trimmed.
- * @param {string} sessionId - the conversation to open.
- * @param {Function} ok - called once the words have been handed over.
- * @param {Function} fail - called when there is no box to put them in.
+ * The mirror of `seatCaretAtEnd`, and it exists for the one thing the box
+ * gains from being written into at the top: a title goes above whatever the
+ * reader has already typed, and typing into a box is the only way this host
+ * has accepted words without replacing the draft.
+ * @param {Element} root - the editor root.
  * @returns {void}
  */
-function dropCardIntoComposer(text, sessionId, ok, fail) {
-  boardOpenSession(sessionId)
-  // The box is usually already there, and this hand-over has always finished
-  // in the same press it started with: a microtask between the drop and the
-  // card that turns into a trace would be a change nobody asked for.
-  if (pasteIntoBoxNow(text)) {
-ok()
-return
+function seatCaretAtStart(root) {
+  if (!root) return
+  if (typeof root.setSelectionRange === 'function' && typeof root.value === 'string') {
+    try {
+      root.setSelectionRange(0, 0)
+      return
+    } catch (error) {
+      // Fall through to the range, which is what a rich editor wants.
+    }
   }
-  pasteIntoComposer(text).then(function (done) {
-if (done) ok()
-else fail()
-  }, fail)
+  try {
+    if (!window.getSelection || typeof document.createRange !== 'function') return
+    var range = document.createRange()
+    range.selectNodeContents(root)
+    range.collapse(true)
+    var selection = window.getSelection()
+    if (!selection) return
+    selection.removeAllRanges()
+    selection.addRange(range)
+  } catch (error) {
+    // A host that refuses the range keeps its own caret; the words still land.
+  }
 }
 
 /**
- * Put the words in the box that is on screen right now, if there is one.
- * @param {string} text - what to put in the box.
- * @returns {boolean} whether the words landed.
+ * Put a title the reader just wrote at the top of the message box.
+ *
+ * The title travels as the message's first line, a blank line below it, and
+ * whatever the reader had already typed after that: the host has nowhere to
+ * keep a title otherwise, and a first line is what every reader and every
+ * model already sees. Enter in the field is the press that means this, so
+ * the field is emptied only once the box has taken the words — a box that
+ * refuses them leaves the line where the reader can try again.
+ * @param {Element} input - the title field.
+ * @returns {boolean} whether the box took the title.
  */
-function pasteIntoBoxNow(text) {
+function commitComposerTitle(input) {
+  var title = String((input && input.value) || '').replace(/\s+/g, ' ').trim()
+  if (!title) return false
   var root = composerRoot()
-  if (!root) return false
+  if (!root || !isComposerEditor(root)) {
+    showToast(paletteText('composerTitleNoBox'))
+    return false
+  }
+  // A plain field answers its own way: its value is the draft, and the
+  // selection range is where the words go. Read off the tag rather than off
+  // a value property, because a host's editor root may carry one too.
+  var plain = root.tagName === 'TEXTAREA' || root.tagName === 'INPUT'
+  if (plain) {
+    root.value = title + BLANK_LINE + root.value
+    try {
+      if (typeof root.dispatchEvent === 'function') {
+        root.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    } catch (error) {
+      /* a host that refuses the event still has the words */
+    }
+    input.value = ''
+    return true
+  }
+  focusComposer()
+  seatCaretAtStart(root)
+  var typed = putThroughEditor(root, title + BLANK_LINE)
+  seatCaretAtEnd(root)
+  if (!typed) return false
+  input.value = ''
+  return true
+}
+
+/** The conversations with a hand-over in flight, so one flush is not two. */
+var HANDOFF_FLUSHING = Object.create(null)
+
+/**
+ * Put a conversation's waiting hand-over into its message box.
+ *
+ * This is the paste the drop used to do, moved to the moment the box
+ * exists: the caret goes to the end, a box that already holds words gets a
+ * blank line first, and the cards arrive in the order they were handed
+ * over. Nothing is sent, and nothing is opened - the reader is wherever
+ * they were, which is what makes the second card possible.
+ * @param {string} sessionId - the conversation whose box should take it.
+ * @returns {boolean} whether a flush was started.
+ */
+function flushHandoff(sessionId) {
+  var id = String(sessionId || '')
+  if (!id || HANDOFF_FLUSHING[id]) return false
+  var words = HANDOFF_STORE.pending(id)
+  if (!words.length) return false
+  HANDOFF_FLUSHING[id] = true
+  var text = words.join(BLANK_LINE)
+  noteHandoffDiag({
+    at: Date.now(),
+    how: 'flush',
+    cards: words.length,
+    lines: text.split('\n').length,
+    current: (currentSession() || {}).id || '',
+    box: !!composerRoot(),
+  })
+  // Every ending goes through here: the words landed, or they are still
+  // waiting. The guard is released in the same turn the paste lands, so the
+  // next press is never swallowed by a promise that has not been read yet.
+  function settle(landed) {
+    delete HANDOFF_FLUSHING[id]
+    if (!landed) {
+      showToast(paletteText('boardHandoffWaiting'))
+      return
+    }
+    var left = HANDOFF_STORE.take(id, words.length)
+    // The name follows the words, as it did when a drop pasted them on the
+    // spot: the newest card is the one the conversation turned out to be
+    // about.
+    nameSessionForCard(id, words[words.length - 1])
+    showToast(paletteText('boardHandoffLanded'))
+    // A card let go while these were landing has its own block after them:
+    // it is flushed now, with its own blank line, rather than left for the
+    // next time the conversation is opened.
+    if (left) flushHandoff(id)
+  }
+  // A box that is already on screen takes the words in the press that asks
+  // for them; only a box that still has to mount needs the waiting paste.
+  var now = pasteIntoBoxNow(text, id)
+  if (now === null || now === false) {
+    pasteIntoComposer(text, id).then(settle, function () {
+      delete HANDOFF_FLUSHING[id]
+    })
+    return true
+  }
+  if (now === true) {
+    settle(true)
+    return true
+  }
+  now.then(settle, function () {
+    delete HANDOFF_FLUSHING[id]
+  })
+  return true
+}
+
+/**
+ * Put words in the box that is on screen right now, if it is the right one.
+ *
+ * The hand-over's own quick path: a conversation whose box is already up -
+ * the floating board over its conversation, or a check's fake page - takes
+ * the words without waiting for a retry loop that would only find the same
+ * box. A box belonging to another conversation is refused, because the
+ * words were meant for a particular one.
+ * @param {string} text - what to put in the box.
+ * @param {string} sessionId - the conversation the box must belong to.
+ * @returns {boolean|Promise<boolean>|null} whether the words landed - in the
+ *   same turn when they were typed - or null when the box on screen is not
+ *   the one they were meant for.
+ */
+function pasteIntoBoxNow(text, sessionId) {
+  var root = composerRoot()
+  if (!root) return null
+  var here = sessionId ? currentSession() : null
+  if (here && here.id !== sessionId) return null
   focusComposer()
   seatCaretAtEnd(root)
-  // The thought lands at the end of the box, after a blank line when the
-  // reader has already written something: two breaks, the way Markdown
-  // separates two blocks. One break would read as finishing their sentence.
-  var words = boxHasText(root) ? BLANK_LINE + text : text
-  if (putThroughEditor(words)) return true
-  return pasteThroughEvent(root, words)
+  // The words land at the end of the box, after a blank line when the reader
+  // has already written there: two breaks, the way Markdown separates two
+  // blocks. One break would read as finishing their sentence.
+  var already = boxTakesBreak(root, sessionId)
+  var words = already ? BLANK_LINE + text : text
+  var landed = writeIntoBox(root, words)
+  if (landed && typeof landed.then === 'function') {
+    return landed.then(function (took) {
+      if (took) noteBoxWritten(root, sessionId, words)
+      return took
+    })
+  }
+  if (landed) noteBoxWritten(root, sessionId, words)
+  return landed
 }
 
 /**
- * Put text into the editor through the editing command.
+ * TEMPORARY: where a hand-over leaves the facts of what it did to the box,
+ * so the shape of this editor's answer can be read after the fact.
+ */
+var DIAG_KEY = NS + '/diag/v1'
+
+/**
+ * TEMPORARY: one box, read small enough to keep a few of.
+ * @param {Element} root - the editor root.
+ * @returns {object|null} its text length, its child count, and its opening HTML.
+ */
+function boxShape(root) {
+  if (!root) return null
+  var html = ''
+  try {
+    html = String(root.innerHTML || '')
+  } catch (error) {
+    html = ''
+  }
+  return {
+    text: String(root.textContent || '').length,
+    kids: root.childNodes ? root.childNodes.length : -1,
+    html: html.slice(0, 200),
+  }
+}
+
+/**
+ * TEMPORARY: every editable the page offers, read short.
+ * @returns {Array<object>} one entry per editable, at most six.
+ */
+function editablesNow() {
+  var out = []
+  try {
+    var list = document.querySelectorAll('[contenteditable="true"], [data-lexical-editor="true"]')
+    for (var i = 0; i < list.length && i < 6; i++) {
+      var el = list[i]
+      out.push({
+        tag: el.tagName,
+        lex: el.getAttribute('data-lexical-editor'),
+        conn: el.isConnected,
+        focused: el === document.activeElement,
+        text: String(el.textContent || '').length,
+        kids: el.childNodes ? el.childNodes.length : -1,
+        html: String(el.innerHTML || '').slice(0, 120),
+      })
+    }
+  } catch (error) {
+    out.push({ error: String(error && error.message) })
+  }
+  return out
+}
+
+/**
+ * TEMPORARY: what one element is, and whether it is the focused one.
+ * @param {Element} el - the element.
+ * @returns {object|null} its name.
+ */
+function describeEl(el) {
+  if (!el) return null
+  return {
+    tag: el.tagName,
+    lex: el.getAttribute('data-lexical-editor'),
+    ce: el.getAttribute('contenteditable'),
+    conn: el.isConnected,
+    focused: el === document.activeElement,
+    cls: String(el.className || '').slice(0, 80),
+  }
+}
+
+/**
+ * TEMPORARY: where the caret is, and whether that is inside the box.
+ * @param {Element} root - the box the words were meant for.
+ * @returns {object|null} the caret's home.
+ */
+function caretsNow(root) {
+  try {
+    var selection = window.getSelection && window.getSelection()
+    if (!selection) return null
+    var node = selection.anchorNode
+    return {
+      tag: node ? node.nodeName : '',
+      inside: !!(root && node && root.contains && root.contains(node)),
+      text: String(selection).slice(0, 40),
+    }
+  } catch (error) {
+    return null
+  }
+}
+
+/**
+ * TEMPORARY: keep the last few hand-overs' facts.
+ * @param {object} entry - what happened.
+ * @returns {void}
+ */
+function noteHandoffDiag(entry) {
+  try {
+    var all = []
+    try {
+      all = JSON.parse(window.localStorage.getItem(DIAG_KEY) || '[]')
+    } catch (error) {
+      all = []
+    }
+    if (!Array.isArray(all)) all = []
+    all.push(entry)
+    window.localStorage.setItem(DIAG_KEY, JSON.stringify(all.slice(-6)))
+  } catch (error) {
+    // A diagnostic that throws is not worth a word.
+  }
+}
+
+/**
+ * Put text into the editor the way typing would.
  *
- * A rich-text editor inserts a line this way, and it arrives as typing,
- * which is what keeps the draft's own history and the shell's placeholder
- * in step.
+ * A line break in a rich editor is a block boundary, not a character inside
+ * a text run: one insert carrying "\n" leaves both sides in the same
+ * paragraph, which is how two cards handed over one after the other used to
+ * arrive on one line. So the text is typed line by line with a paragraph
+ * break between the lines, and every character arrives as typing, which is
+ * what keeps the draft's own history and the shell's placeholder in step.
+ * @param {Element} root - the editor root the words are meant for.
  * @param {string} text - what to insert.
  * @returns {boolean} whether the editor took it.
  */
-function putThroughEditor(text) {
+function putThroughEditor(root, text) {
   if (typeof document.execCommand !== 'function') return false
-  try {
-return !!document.execCommand('insertText', false, text)
-  } catch (error) {
-return false
+  var before = boxShape(root)
+  var commands = []
+  /** Type one line, and say whether the editor took it. */
+  function typeLine(line) {
+    commands.push('insertText')
+    try {
+      return !!document.execCommand('insertText', false, line)
+    } catch (error) {
+      return false
+    }
   }
+  var words = String(text === null || text === undefined ? '' : text)
+  var lines = words.split('\n')
+  var typed = false
+  if (lines.length === 1) {
+    typed = typeLine(words)
+  } else {
+    try {
+      for (var i = 0; i < lines.length; i++) {
+        if (i > 0) {
+          commands.push('insertParagraph')
+          document.execCommand('insertParagraph', false, null)
+        }
+        if (!lines[i]) {
+          typed = true
+          continue
+        }
+        if (!typeLine(lines[i])) break
+        typed = true
+      }
+    } catch (error) {
+      // Whatever landed stays landed; a later line simply did not.
+    }
+  }
+  noteHandoffDiag({
+    at: Date.now(),
+    how: 'typing',
+    typed: typed,
+    want: lines.length - 1,
+    commands: commands,
+    before: before,
+    after: boxShape(root),
+    root: describeEl(root),
+    carets: caretsNow(root),
+    editables: editablesNow(),
+  })
+  // The editor commits on its own beat, so the box is read again after it
+  // has had one: what is there now is the answer, what was there before is
+  // only the promise of it.
+  window.setTimeout(function () {
+    noteHandoffDiag({
+      at: Date.now(),
+      how: 'later',
+      after: boxShape(root),
+      carets: caretsNow(root),
+      editables: editablesNow(),
+    })
+  }, 300)
+  return typed
 }
 
 /**
@@ -3078,18 +3595,26 @@ return false
  */
 function pasteThroughEvent(root, text) {
   try {
-if (typeof ClipboardEvent !== 'function' || typeof DataTransfer !== 'function') return false
-var data = new DataTransfer()
-data.setData('text/plain', text)
-root.dispatchEvent(new ClipboardEvent('paste', {
-  clipboardData: data,
-  bubbles: true,
-  cancelable: true,
-}))
-return true
+    if (typeof ClipboardEvent !== 'function' || typeof DataTransfer !== 'function') return false
+    var data = new DataTransfer()
+    data.setData('text/plain', text)
+    // A text run cannot carry a break: give the paste the blocks too, so a
+    // rich editor reads the cards as paragraphs rather than as one line.
+    data.setData('text/html', String(text).split('\n').map(function (line) {
+      return '<p>' + line
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;') + '</p>'
+    }).join(''))
+    root.dispatchEvent(new ClipboardEvent('paste', {
+      clipboardData: data,
+      bubbles: true,
+      cancelable: true,
+    }))
+    return true
   } catch (error) {
-console.warn('[dsh-vim] could not put the words in the message box', error)
-return false
+    console.warn('[dsh-vim] could not put the words in the message box', error)
+    return false
   }
 }
 
@@ -3682,18 +4207,25 @@ function buildSessionMenu(summary, done) {
   // The menu is not the card: a press inside it is a choice, never a carry.
   menu.setAttribute('data-no-drag', 'true')
   menu.appendChild(cardMenuItem(paletteText('boardCardRenameHint'), 'cardRenameOpen', function () {
-beginBoardRename(summary.id)
+    beginBoardRename(summary.id)
   }))
   // A card in the finished strip keeps the way back where its other rare
   // verbs live: the mark is the reader's word, and a word can be taken
   // back without waiting for midnight.
   if (done) {
-menu.appendChild(cardMenuItem(paletteText('boardDoneRestore'), 'cardRestoreFocus', function () {
-  bringBackFromDone(summary.id)
-  showToast(paletteText('boardDoneRestored'))
-  renderBoard()
-}))
+    menu.appendChild(cardMenuItem(paletteText('boardDoneRestore'), 'cardRestoreFocus', function () {
+      bringBackFromDone(summary.id)
+      showToast(paletteText('boardDoneRestored'))
+      renderBoard()
+    }))
   }
+  // Deleting is taking it off the board, not archiving the conversation:
+  // the shell keeps it, the sidebar keeps it, and it comes back the next
+  // time it is used. It is the one destructive verb, so it lives with the
+  // rare ones rather than on the card's face.
+  menu.appendChild(cardMenuItem(paletteText('boardChatRemove'), 'cardRemove', function () {
+    removeBoardCard(summary)
+  }))
   return menu
 }
 
@@ -3785,18 +4317,18 @@ function buildBoardLooseCard(card, titles, opts) {
   // every mark on it are the same ink in different weights.
   var ink = null
   if (stacked) {
-// A thought filed under a conversation is read in that conversation's
-// column: its place is the column's, its order is the document's, and
-// nothing about it is a free position on the paper any more.
-node.style.position = 'relative'
-node.style.left = 'auto'
-node.style.top = 'auto'
-node.style.width = '100%'
-node.setAttribute('data-stack', stacked)
+    // A thought filed under a conversation is read in that conversation's
+    // column: its place is the column's, its order is the document's, and
+    // nothing about it is a free position on the paper any more.
+    node.style.position = 'relative'
+    node.style.left = 'auto'
+    node.style.top = 'auto'
+    node.style.width = '100%'
+    node.setAttribute('data-stack', stacked)
   } else {
-node.style.left = card.x + 'px'
-node.style.top = card.y + 'px'
-node.style.width = BOARD_CARD_W + 'px'
+    node.style.left = card.x + 'px'
+    node.style.top = card.y + 'px'
+    node.style.width = BOARD_CARD_W + 'px'
   }
   // One shape in every state. The paper is planned from the words, and the
   // words and the field are set in the same ruler (`boardNoteMetrics`), so
@@ -3806,12 +4338,12 @@ node.style.width = BOARD_CARD_W + 'px'
   // inked: the paper and the dot are the same fact said twice.
   var linkedBlock = null
   if (card.link) {
-for (var lb = 0; lb < BOARD.blocks.length; lb++) {
-  var rowsHere = BOARD.blocks[lb].rows
-  for (var lr = 0; lr < rowsHere.length; lr++) {
-    if (rowsHere[lr].id === card.link) linkedBlock = BOARD.blocks[lb]
-  }
-}
+    for (var lb = 0; lb < BOARD.blocks.length; lb++) {
+      var rowsHere = BOARD.blocks[lb].rows
+      for (var lr = 0; lr < rowsHere.length; lr++) {
+        if (rowsHere[lr].id === card.link) linkedBlock = BOARD.blocks[lb]
+      }
+    }
   }
   if (!card.done) Object.assign(node.style, notePaper(linkedBlock))
   ink = noteInkOf(linkedBlock, card.done)
@@ -3822,6 +4354,11 @@ for (var lb = 0; lb < BOARD.blocks.length; lb++) {
   // the whole of its paper until it is opened. A free card keeps the two
   // lines it was always planned with.
   var compact = !!stacked && !opened
+  // Filed and at rest, the card is a line rather than a sheet: the same
+  // height, corner and padding the inbox's rows wear. Its hue and its marks
+  // stay - the colour is the goal it belongs to, and the marks are its
+  // verbs. Opening it gives the card its paper back to be typed on.
+  if (compact) Object.assign(node.style, BOARD_UI.stackedNote)
   var box = opened ? boardCardOpenBox(card.text) : boardCardBox(card.text, compact ? 1 : card.h)
   var metrics = boardNoteMetrics()
   node.style.height = box.height + 'px'
@@ -3833,15 +4370,15 @@ for (var lb = 0; lb < BOARD.blocks.length; lb++) {
   // opens at the paper it replaced, and the card follows it only if the
   // writing needs more room than that paper had.
   if (BOARD.cardEditing === card.id) {
-node.style.height = 'auto'
-node.style.minHeight = box.height + 'px'
+    node.style.height = 'auto'
+    node.style.minHeight = box.height + 'px'
   }
   // A card that holds more than it can show says so by fading its last line
   // rather than by hiding the rest behind a scrollbar inside the paper.
   if (!compact && parts.rows > box.lines) node.setAttribute('data-clipped', 'true')
   if (BOARD.front === card.id) {
-node.setAttribute('data-front', 'true')
-node.style.zIndex = String(BOARD.zTop)
+    node.setAttribute('data-front', 'true')
+    node.style.zIndex = String(BOARD.zTop)
   }
   // There is no corner to drag: a card is opened by pressing it, which shows
   // the whole of it, and closed by leaving it (see `boardCardOpenBox`).
@@ -3854,6 +4391,7 @@ node.style.zIndex = String(BOARD.zTop)
 
   var head = document.createElement('div')
   Object.assign(head.style, BOARD_UI.looseHead)
+  if (compact) Object.assign(head.style, BOARD_UI.stackedHead)
   head.className = 'dshv-note-head'
   head.setAttribute('data-role', 'looseHead')
   // The whole card is the handle now, so a grip would be a second invitation
@@ -3864,9 +4402,9 @@ node.style.zIndex = String(BOARD.zTop)
   // third mark on a heading that already has three.
   var parentTitle = card.link ? titles[card.link] || '' : ''
   if (card.link) {
-node.setAttribute('title', parentTitle
-  ? paletteText('boardCardLinked') + parentTitle
-  : paletteText('boardCardLinkedUnknown'))
+    node.setAttribute('title', parentTitle
+      ? paletteText('boardCardLinked') + parentTitle
+      : paletteText('boardCardLinkedUnknown'))
   }
   // Unlinking is one of the card's rarer verbs now: it lives in the card's
   // own menu, with the rest (see `buildIdeaMenu`).
@@ -3885,19 +4423,19 @@ node.setAttribute('title', parentTitle
   // from the paper's ink: the board's grey outline vanishes here.
   doneToggle.style.borderColor = ink.edge
   if (card.done) {
-doneToggle.style.background = 'hsl(45 74% 62%)'
-doneToggle.style.borderColor = 'hsl(45 60% 46%)'
-doneToggle.style.color = 'hsl(45 40% 16%)'
+    doneToggle.style.background = 'hsl(45 74% 62%)'
+    doneToggle.style.borderColor = 'hsl(45 60% 46%)'
+    doneToggle.style.color = 'hsl(45 40% 16%)'
   }
   doneToggle.setAttribute('data-done', card.done ? 'true' : 'false')
   doneToggle.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-BOARD_STORE.setCardDone(card.id, !card.done)
-renderBoard()
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    BOARD_STORE.setCardDone(card.id, !card.done)
+    renderBoard()
   })
   // Two zones: the state the card is in, then what it belongs to. Deleting
   // and unlinking are secondary, and arrive under the pointer rather than
@@ -3906,87 +4444,113 @@ renderBoard()
   // to hold nothing but a box now says what the note is about.
   var title = null
   if (opened && BOARD.cardField === 'title') {
-// The name is a field of its own, in the row it belongs to. Typing here is
-// typing the title - the body below is untouched.
-title = document.createElement('input')
-Object.assign(title.style, BOARD_UI.looseTitle, BOARD_UI.looseTitleBox)
-title.setAttribute('type', 'text')
-title.setAttribute('data-role', 'cardTitleInput')
-title.setAttribute('data-no-drag', 'true')
-title.setAttribute('aria-label', paletteText('boardNoteTitleHint'))
-title.setAttribute('placeholder', paletteText('boardNoteTitleHint'))
-title.style.color = ink.text
-title.value = parts.title
-title.addEventListener('input', function () {
-  BOARD_STORE.setCardText(card.id, boardJoinText(title.value, parts.body))
-})
-title.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Enter') {
-    ev.preventDefault()
-    // The name is done; the thought is next.
-    commitBoardCard()
-    var all = BOARD_STORE.cards()
-    for (var k = 0; k < all.length; k++) {
-      if (all[k].id !== card.id) continue
-      beginBoardCard(card.id, 'body')
-    }
-  } else if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelBoardCard()
-  }
-})
-title.addEventListener('blur', function () {
-  if (BOARD.cardEditing === card.id && BOARD.cardField === 'title'
-    && BOARD.cardEditor === title) commitBoardCard()
-})
-BOARD.cardEditor = title
+    // The name is a field of its own, in the row it belongs to. Typing here is
+    // typing the title - the body below is untouched.
+    title = document.createElement('input')
+    Object.assign(title.style, BOARD_UI.looseTitle, BOARD_UI.looseTitleBox)
+    title.setAttribute('type', 'text')
+    title.setAttribute('data-role', 'cardTitleInput')
+    title.setAttribute('data-no-drag', 'true')
+    title.setAttribute('aria-label', paletteText('boardNoteTitleHint'))
+    title.setAttribute('placeholder', paletteText('boardNoteTitleHint'))
+    title.style.color = ink.text
+    title.value = parts.title
+    title.addEventListener('input', function () {
+      BOARD_STORE.setCardText(card.id, boardJoinText(title.value, parts.body))
+    })
+    title.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        // The name is done; the thought is next.
+        commitBoardCard()
+        var all = BOARD_STORE.cards()
+        for (var k = 0; k < all.length; k++) {
+          if (all[k].id !== card.id) continue
+          beginBoardCard(card.id, 'body')
+        }
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelBoardCard()
+      }
+    })
+    title.addEventListener('blur', function () {
+      if (BOARD.cardEditing === card.id && BOARD.cardField === 'title'
+        && BOARD.cardEditor === title) commitBoardCard()
+    })
+    BOARD.cardEditor = title
   } else {
-title = document.createElement('span')
-Object.assign(title.style, BOARD_UI.looseTitle)
-title.setAttribute('data-role', 'looseTitle')
-title.style.color = ink.text
-title.textContent = parts.title || paletteText('boardNoteUntitled')
-title.style.opacity = parts.title ? '1' : '0.45'
-if (card.link && parentTitle) {
-  title.setAttribute('title', paletteText('boardCardLinked') + parentTitle)
-}
-title.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  openIdeaFocus(card.id, 'title', { origin: ideaFocusOrigin(ev, node) })
-})
+    title = document.createElement('span')
+    Object.assign(title.style, BOARD_UI.looseTitle)
+    if (compact) Object.assign(title.style, BOARD_UI.stackedTitle)
+    title.setAttribute('data-role', 'looseTitle')
+    title.style.color = ink.text
+    title.textContent = parts.title || paletteText('boardNoteUntitled')
+    title.style.opacity = parts.title ? '1' : '0.45'
+    if (card.link && parentTitle) {
+      title.setAttribute('title', paletteText('boardCardLinked') + parentTitle)
+    }
+    title.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      openIdeaFocus(card.id, 'title', { origin: ideaFocusOrigin(ev, node) })
+    })
   }
   head.appendChild(doneToggle)
   // The title is always in this row, whether it is text or a field: the name
   // of the note is the first thing in it, at every moment.
   head.appendChild(title)
+  // A free card can be pinned: locked, a tidy leaves it exactly where the
+  // reader put it. A card filed under a conversation has a place already -
+  // the column's - so it wears no pin of its own.
+  if (!stacked) {
+    var pin = document.createElement('span')
+    Object.assign(pin.style, BOARD_UI.looseLock)
+    if (card.locked) Object.assign(pin.style, BOARD_UI.looseLockOn)
+    pin.className = 'dshv-note-lock'
+    pin.setAttribute('role', 'button')
+    pin.setAttribute('data-role', 'cardLockIdea')
+    pin.setAttribute('aria-pressed', card.locked ? 'true' : 'false')
+    pin.setAttribute('title', paletteText(card.locked ? 'boardIdeaUnlockHint' : 'boardIdeaLockHint'))
+    pin.setAttribute('aria-label', paletteText(card.locked ? 'boardIdeaUnlockHint' : 'boardIdeaLockHint'))
+    pin.appendChild(boardIcon(card.locked ? 'lock' : 'unlock', 11))
+    pin.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      BOARD_STORE.toggleCardLock(card.id)
+      renderBoard()
+    })
+    head.appendChild(pin)
+  }
 
   // The two verbs worth a seat of their own: hand the words to the
   // conversation this thought belongs to, and open the menu for the rest.
   if (stacked) {
-var deliver = document.createElement('span')
-Object.assign(deliver.style, BOARD_UI.looseDeliver)
-deliver.className = 'dshv-deliver'
-deliver.setAttribute('role', 'button')
-deliver.setAttribute('data-role', 'cardDeliver')
-deliver.setAttribute('title', paletteText('boardCardDeliverHint'))
-deliver.setAttribute('aria-label', paletteText('boardCardEnterHint'))
-deliver.appendChild(boardIcon('enter', 13))
-deliver.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  if (BOARD.dragged) {
-    BOARD.dragged = false
-    return
-  }
-  var words = String(card.text || '').trim()
-  if (!words) return
-  handCardToSession(card.id, stacked, words)
-})
-head.appendChild(deliver)
+    var deliver = document.createElement('span')
+    Object.assign(deliver.style, BOARD_UI.looseDeliver)
+    deliver.className = 'dshv-deliver'
+    deliver.setAttribute('role', 'button')
+    deliver.setAttribute('data-role', 'cardDeliver')
+    deliver.setAttribute('title', paletteText('boardCardDeliverHint'))
+    deliver.setAttribute('aria-label', paletteText('boardCardEnterHint'))
+    deliver.appendChild(boardIcon('enter', 13))
+    deliver.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      if (BOARD.dragged) {
+        BOARD.dragged = false
+        return
+      }
+      var words = String(card.text || '').trim()
+      if (!words) return
+      handCardToSession(card.id, stacked, words)
+    })
+    head.appendChild(deliver)
   }
   var more = document.createElement('span')
   Object.assign(more.style, BOARD_UI.looseMore)
@@ -3998,23 +4562,23 @@ head.appendChild(deliver)
   more.setAttribute('aria-expanded', BOARD.ideaMenu === card.id ? 'true' : 'false')
   more.textContent = '\u22ef'
   more.addEventListener('click', function (ev) {
-if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-// Opening a menu is not a repaint: the board may be mid-field, and a
-// paint would take the card out from under the press that asked.
-if (BOARD.ideaMenu === card.id) {
-  closeIdeaMenu()
-  more.setAttribute('aria-expanded', 'false')
-  return
-}
-closeIdeaMenu()
-closeGoalMenu()
-BOARD.ideaMenu = card.id
-more.setAttribute('aria-expanded', 'true')
-node.appendChild(buildIdeaMenu(card, stacked, parts))
+    if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    // Opening a menu is not a repaint: the board may be mid-field, and a
+    // paint would take the card out from under the press that asked.
+    if (BOARD.ideaMenu === card.id) {
+      closeIdeaMenu()
+      more.setAttribute('aria-expanded', 'false')
+      return
+    }
+    closeIdeaMenu()
+    closeGoalMenu()
+    BOARD.ideaMenu = card.id
+    more.setAttribute('aria-expanded', 'true')
+    node.appendChild(buildIdeaMenu(card, stacked, parts))
   })
   head.appendChild(more)
   node.appendChild(head)
@@ -4022,91 +4586,91 @@ node.appendChild(buildIdeaMenu(card, stacked, parts))
   BOARD.looseNodes[card.id] = node
 
   if (opened && BOARD.cardField === 'body') {
-var editor = document.createElement('textarea')
-Object.assign(editor.style, BOARD_UI.looseEditor)
-editor.setAttribute('data-role', 'cardText')
-editor.setAttribute('aria-label', paletteText('boardCardPlaceholder'))
-editor.setAttribute('placeholder', paletteText('boardNoteTitleHint'))
-// The field is the card's own ruler: same type, same line box, and the
-// very number of rows the paper was planned for. That is the whole of
-// why a press does not resize the card it pressed.
-editor.style.fontSize = metrics.font + 'px'
-editor.style.lineHeight = metrics.line + 'px'
-editor.setAttribute('rows', String(box.lines))
-editor.style.height = (box.lines * metrics.line) + 'px'
-// The field grows with the writing and the paper grows with the field:
-// a thought is read whole, so there is no letterbox and no scrollbar
-// inside the paper any more.
-editor.setAttribute('placeholder', paletteText('boardCardPlaceholder'))
-editor.value = parts.body
-editor.addEventListener('input', function () {
-  BOARD_STORE.setCardText(card.id, boardJoinText(parts.title, editor.value))
-  var grown = boardEditorRows(editor.value)
-  if (editor.getAttribute('rows') === String(grown)) return
-  editor.setAttribute('rows', String(grown))
-  editor.style.height = (grown * metrics.line) + 'px'
-  // The paper grows with the writing while the field is up, and the
-  // paint after it closes lands on the same size it was left at.
-  node.style.height = 'auto'
-})
-editor.addEventListener('keydown', function (ev) {
-  if (ev.key === 'Escape') {
-    ev.preventDefault()
-    if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
-    cancelBoardCard()
-  } else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
-    ev.preventDefault()
-    commitBoardCard()
-  }
-})
-editor.addEventListener('blur', function () {
-  if (BOARD.cardEditing === card.id && BOARD.cardEditor === editor) commitBoardCard()
-})
-// A field is the field's: the router leaves the press alone, so text in
-// it can be selected with the pointer.
-editor.setAttribute('data-no-drag', 'true')
-node.appendChild(editor)
-BOARD.cardEditor = editor
+    var editor = document.createElement('textarea')
+    Object.assign(editor.style, BOARD_UI.looseEditor)
+    editor.setAttribute('data-role', 'cardText')
+    editor.setAttribute('aria-label', paletteText('boardCardPlaceholder'))
+    editor.setAttribute('placeholder', paletteText('boardNoteTitleHint'))
+    // The field is the card's own ruler: same type, same line box, and the
+    // very number of rows the paper was planned for. That is the whole of
+    // why a press does not resize the card it pressed.
+    editor.style.fontSize = metrics.font + 'px'
+    editor.style.lineHeight = metrics.line + 'px'
+    editor.setAttribute('rows', String(box.lines))
+    editor.style.height = (box.lines * metrics.line) + 'px'
+    // The field grows with the writing and the paper grows with the field:
+    // a thought is read whole, so there is no letterbox and no scrollbar
+    // inside the paper any more.
+    editor.setAttribute('placeholder', paletteText('boardCardPlaceholder'))
+    editor.value = parts.body
+    editor.addEventListener('input', function () {
+      BOARD_STORE.setCardText(card.id, boardJoinText(parts.title, editor.value))
+      var grown = boardEditorRows(editor.value)
+      if (editor.getAttribute('rows') === String(grown)) return
+      editor.setAttribute('rows', String(grown))
+      editor.style.height = (grown * metrics.line) + 'px'
+      // The paper grows with the writing while the field is up, and the
+      // paint after it closes lands on the same size it was left at.
+      node.style.height = 'auto'
+    })
+    editor.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault()
+        if (typeof ev.stopPropagation === 'function') ev.stopPropagation()
+        cancelBoardCard()
+      } else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault()
+        commitBoardCard()
+      }
+    })
+    editor.addEventListener('blur', function () {
+      if (BOARD.cardEditing === card.id && BOARD.cardEditor === editor) commitBoardCard()
+    })
+    // A field is the field's: the router leaves the press alone, so text in
+    // it can be selected with the pointer.
+    editor.setAttribute('data-no-drag', 'true')
+    node.appendChild(editor)
+    BOARD.cardEditor = editor
   } else if (box.lines > 0 && !compact) {
-var text = document.createElement('div')
-Object.assign(text.style, BOARD_UI.looseText)
-// The words sit on the card's ruler: the same type and line box the
-// paper was planned with, and exactly the room it was planned to hold.
-text.style.fontSize = metrics.font + 'px'
-text.style.lineHeight = metrics.line + 'px'
-text.style.height = (box.lines * metrics.line) + 'px'
-text.style.color = ink.text
-// The card shows the lines it was given, and fades the rest: resizing is
-// what buys more paper, so the clamp follows the paper rather than the
-// words.
-text.style.WebkitLineClamp = String(Math.max(1, box.lines))
-text.setAttribute('data-role', 'looseText')
-// The body only: the title is the heading's, and repeating it here would
-// spend the card's two lines saying what its first line already said.
-text.textContent = parts.body || paletteText('boardCardPlaceholder')
-if (!parts.body) text.style.opacity = '0.4'
-text.addEventListener('click', function (ev) {
-  if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
-  openIdeaFocus(card.id, 'body', { origin: ideaFocusOrigin(ev, node) })
-})
-node.appendChild(text)
+    var text = document.createElement('div')
+    Object.assign(text.style, BOARD_UI.looseText)
+    // The words sit on the card's ruler: the same type and line box the
+    // paper was planned with, and exactly the room it was planned to hold.
+    text.style.fontSize = metrics.font + 'px'
+    text.style.lineHeight = metrics.line + 'px'
+    text.style.height = (box.lines * metrics.line) + 'px'
+    text.style.color = ink.text
+    // The card shows the lines it was given, and fades the rest: resizing is
+    // what buys more paper, so the clamp follows the paper rather than the
+    // words.
+    text.style.WebkitLineClamp = String(Math.max(1, box.lines))
+    text.setAttribute('data-role', 'looseText')
+    // The body only: the title is the heading's, and repeating it here would
+    // spend the card's two lines saying what its first line already said.
+    text.textContent = parts.body || paletteText('boardCardPlaceholder')
+    if (!parts.body) text.style.opacity = '0.4'
+    text.addEventListener('click', function (ev) {
+      if (ev && typeof ev.stopPropagation === 'function') ev.stopPropagation()
+      openIdeaFocus(card.id, 'body', { origin: ideaFocusOrigin(ev, node) })
+    })
+    node.appendChild(text)
   }
   // The card's own press is the card's, body or no body: a note is opened by
   // pressing it, which is the same gesture that shows all of it. A card
   // already being typed into keeps the press for its field, and so does
   // every mark on the heading.
   node.addEventListener('click', function (ev) {
-if (BOARD.dragged) {
-  BOARD.dragged = false
-  return
-}
-if (BOARD.cardEditing === card.id) return
-var hit = ev && ev.target
-if (hit && typeof hit.closest === 'function'
-  && hit.closest('[data-no-drag],[data-role="cardRemove"],[data-role="cardDoneToggle"],'
-    + '[data-role="cardUnlink"],[data-role="cardDeliver"],[data-role="cardMenuOpen"]')) return
-// The paper opens the thought; a card that has none opens its name.
-openIdeaFocus(card.id, parts.body ? 'body' : 'title', { origin: ideaFocusOrigin(ev, node) })
+    if (BOARD.dragged) {
+      BOARD.dragged = false
+      return
+    }
+    if (BOARD.cardEditing === card.id) return
+    var hit = ev && ev.target
+    if (hit && typeof hit.closest === 'function'
+      && hit.closest('[data-no-drag],[data-role="cardRemove"],[data-role="cardDoneToggle"],'
+        + '[data-role="cardUnlink"],[data-role="cardDeliver"],[data-role="cardMenuOpen"]')) return
+    // The paper opens the thought; a card that has none opens its name.
+    openIdeaFocus(card.id, parts.body ? 'body' : 'title', { origin: ideaFocusOrigin(ev, node) })
   })
   return node
 }
@@ -4472,14 +5036,21 @@ if (all[i].id === id) return all[i].done === true
  * @returns {void}
  */
 function handCardToSession(cardId, sessionId, text) {
-  dropCardIntoComposer(text, sessionId, function () {
-    BOARD_STORE.finishCard(cardId, sessionId)
-    nameSessionForCard(sessionId, text)
-    if (BOARD.open) renderBoard()
-  }, function () {
-    if (BOARD.open) renderBoard()
-    showToast(paletteText('boardDropFailed'))
-  })
+  // The words wait for the conversation's box instead of dragging the reader
+  // into it: the board is where the gesture was made, and one drop is not a
+  // reason to leave it. Waiting is also what makes the second and the third
+  // card possible - they join the end of the same queue, in the order they
+  // were let go.
+  HANDOFF_STORE.push(sessionId, text)
+  BOARD_STORE.finishCard(cardId, sessionId)
+  if (BOARD.open) renderBoard()
+  showToast(paletteText('boardHandoffQueued'))
+  // A conversation whose box is already on screen - the floating board over
+  // its own conversation - has nothing to wait for: the words go in now. The
+  // box is asked for, not assumed: a page mounted over a conversation that
+  // still counts as current has no composer to paste into.
+  var here = currentSession()
+  if (here && here.id === sessionId && composerRoot()) flushHandoff(sessionId)
 }
 
 /**
@@ -4498,6 +5069,9 @@ function handCardToSession(cardId, sessionId, text) {
  * @returns {void}
  */
 function nameSessionForCard(sessionId, text) {
+  // The words still land; only the name is the board's to give, and only
+  // when the reader left the switch on.
+  if (settings.autoRename === false) return
   // A locked title is the reader's own word: handing a thought over must not
   // rewrite a name chosen for reasons the board cannot see.
   if (BOARD_STORE.isSessionLocked(sessionId)) return
@@ -4512,5 +5086,4 @@ function nameSessionForCard(sessionId, text) {
   })
 }
 
-
-export { nameSessionForCard, handCardToSession, sendToDone, bringBackFromDone, pasteIntoComposer, renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock, addBoardCard, addBoardCardAt, commitGoalIntent, closeIdeaFocus, buildBoardCard, dropCardIntoComposer, settleBoardCardForPress, closeIdeaMenu, closeSeatMenu, closeGoalMenu, closeVerdictMenu, closeSessionMenu, boardNoteDone, openIdeaFocus }
+export { commitComposerTitle, nameSessionForCard, handCardToSession, sendToDone, bringBackFromDone, pasteIntoComposer, renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock, addBoardCard, addBoardCardAt, commitGoalIntent, closeIdeaFocus, buildBoardCard, settleBoardCardForPress, closeIdeaMenu, closeSeatMenu, closeGoalMenu, closeVerdictMenu, closeSessionMenu, boardNoteDone, openIdeaFocus, flushHandoff }

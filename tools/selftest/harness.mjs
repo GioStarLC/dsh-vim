@@ -1356,17 +1356,39 @@ async function loadBundle(suffix = '') {
   await import(BUNDLE + suffix)
   assert.ok(captured, 'bundle must register itself with window.__ModuleLoader__')
   assert.equal(captured.id, 'dsh-vim')
-  return captured.exports
+  const exports = captured.exports
+  if (typeof exports.apply === 'function') {
+    const apply = exports.apply
+    exports.apply = function (ctx) {
+      // One page has one plugin: a reload or a second mount lets go of the
+      // instance before it, so no handler and no watch answers twice.
+      for (const dispose of applied.splice(0)) {
+        if (typeof dispose === 'function') dispose()
+      }
+      const mark = ctx.log.cleanups.length
+      const result = apply(ctx)
+      currentDisposer = ctx.log.cleanups[mark]
+      applied.push(currentDisposer)
+      return result
+    }
+  }
+  return exports
 }
 
-const client = await loadBundle()
+const applied = []
+let currentDisposer = null
+let recoveries = 0
+let client = await loadBundle()
 assert.equal(typeof client.apply, 'function', 'client bundle must export apply()')
 assert.deepEqual(client.inject, ['slots', 'locale'], 'the client plugin must inject slots and locale')
 
-const ctx = makeCtx()
+let ctx = makeCtx()
 client.apply(ctx)
+currentDisposer = applied[applied.length - 1]
 assert.ok(fakeWindow.__dshVim, 'apply() must expose the debug API')
-let cleanup = ctx.log.cleanups[0]
+let cleanup = function () {
+  if (typeof currentDisposer === 'function') currentDisposer()
+}
 assert.equal(typeof cleanup, 'function', 'apply() must register a disposer')
 
 // --- dispatch helpers ------------------------------------------------------
@@ -1480,6 +1502,7 @@ const SHIPPED = {
   sendBlurs: true,
   sendMode: 'host',
   snapshotKeepDays: 3650,
+  autoRename: true,
   favorites: [],
 }
 
@@ -1509,8 +1532,16 @@ const peak = { heap: 0, label: '' }
  * depends on what the one before it left behind.
  * @returns {void}
  */
-function reset() {
-  fakeWindow.__dshVim.stop()
+async function reset() {
+  const live = fakeWindow.__dshVim
+  if (live && typeof live.stop === 'function') live.stop()
+  if (!fakeWindow.__dshVim) {
+    client = await loadBundle('?recover=' + (++recoveries))
+    ctx = makeCtx()
+    const mark = ctx.log.cleanups.length
+    client.apply(ctx)
+    currentDisposer = ctx.log.cleanups[mark]
+  }
   // A check is a page of its own, so neither a timer nor a frame that the one
   // before it left queued may fire into it. A stale frame is not merely late:
   // it is called back once per slice of every later advance, so one animation
@@ -1519,6 +1550,9 @@ function reset() {
   frames.length = 0
   // The history lives as long as the page does, and a check is not a page: it
   // starts from no steps so that "nothing to take back" means it.
+  // A check starts with no window open: the page's run watch is the only
+  // status subscription that may outlive the page before it.
+  if (statusFeed.listeners.length > 1) statusFeed.listeners.splice(0, statusFeed.listeners.length - 1)
   fakeWindow.__dshVim.clearHistory()
   // Every check starts from the shipped bindings, so none depends on a
   // previous one having left the preferences where it found them.
@@ -1613,7 +1647,6 @@ function finish(label) {
   assert.equal(left, 0, `"${label}" left ${left} of ${mounted} nodes on the page after the plugin was stopped`)
 }
 
-/** Run one synchronous check against a clean state, and leave one behind. */
 /** Registered checks, in the order the suites declared them. */
 const queue = []
 
@@ -1622,7 +1655,7 @@ function step(fn) {
   queue.push({ raw: fn })
 }
 
-/** Register one synchronous check. */
+/** Run one synchronous check against a clean state, and leave one behind. */
 function check(label, fn) {
   queue.push({ label, fn, async: false })
 }
@@ -1631,7 +1664,6 @@ function check(label, fn) {
  * Run one check that has to wait for the host hop behind a rename. The plugin
  * answers through a promise, so the assertion cannot be made in the same tick.
  */
-/** Register one asynchronous check. */
 function checkAsync(label, fn) {
   queue.push({ label, fn, async: true })
 }
@@ -1647,7 +1679,7 @@ async function runChecks() {
       await item.raw()
       continue
     }
-    reset()
+    await reset()
     await item.fn()
     finish(item.label)
     checks++
@@ -1655,27 +1687,25 @@ async function runChecks() {
   }
 }
 
-// --- feel: easing, not teleporting ----------------------------------------
-
-
 /** Count one check the suite runs by hand, past the helpers. */
-export function bumpChecks() {
+function bumpChecks() {
   checks++
 }
 
-/** Set the harness clock; a check that crosses midnight pins one. */
-export function setNow(v) {
+/** Pin the harness clock: a check that crosses midnight sets one. */
+function setNow(v) {
   now = v
 }
 
 /** Set the media preference the reduced-motion checks read. */
-export function setMediaReduce(v) {
+function setMediaReduce(v) {
   mediaReduce = v
 }
 
 /** Set whether a suggestion menu owns Enter. */
-export function setMenuOnScreen(v) {
+function setMenuOnScreen(v) {
   menuOnScreen = v
 }
 
-export { step, runChecks, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync }
+
+export { ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync, runChecks, step, bumpChecks, setNow, setMediaReduce, setMenuOnScreen }
