@@ -609,8 +609,27 @@ var REPEAT_INTERVAL = 65
 var MIN_REPEAT_INTERVAL = 45
 var REPEAT_RAMP = 3
 
+/**
+ * The canvas's own chrome.
+ *
+ * A sheet you pan, not a list you read: everything is sized so a title is
+ * the thing the eye lands on, and the metadata under it stays legible
+ * without leaning in. One base size on the mount, everything inside in em.
+ */
+/**
+ * The paper a note is made of, wherever a note is drawn.
+ *
+ * The sheet on the canvas and the line in the tray differ in shape and in
+ * nothing else, so the material lives here once: both read these four
+ * properties, and neither can drift from the other while the shapes stay
+ * their own. Layout is the caller's and is deliberately not in here.
+ */
+/** A newline, spelled once so no editor or tool can double its escape. */
+var CHAR_NEWLINE = String.fromCharCode(10)
+
 
 export {
+  CHAR_NEWLINE,
   NS,
   STORAGE_KEY,
   RAW_INPUT_SELECTOR,
