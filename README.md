@@ -103,7 +103,7 @@
 dsh plugin --profile web add "G:\桌面\dsh-vim"
 ```
 
-本包没有任何依赖、没有 install/build 脚本，不需要 pnpm 的 `allowBuilds` 授权。
+运行时零依赖；`rollup` 只在构建时用（唯一的 devDependency），不参与运行时，也不需要 pnpm 的 `allowBuilds` 授权。
 
 ## 结构
 
@@ -112,25 +112,30 @@ dsh-vim/
 ├── package.json        dsh.bundle.patch + dsh.client
 ├── cordis.patch.yml    insert 一行 dsh-vim，让 Loader 挂载本插件
 ├── dsh.plugin.json     插件管理器展示用的清单
+├── src/client/         浏览器面源码：按职责分文件
+│   └── index.js        入口：插件名、inject、apply
+├── scripts/build.mjs   src/client/ → lib/client.js（rollup）
 ├── lib/
 │   ├── index.js        Host 面：空壳 apply
-│   └── client.js       浏览器面：全部逻辑
+│   └── client.js       浏览器面产物，提交进仓库，不手改
 ├── tools/
 │   ├── selftest.mjs    假 DOM + 虚拟时钟的行为断言
 │   └── probe.patch.yml 不落盘的合成验证 overlay
 └── MAP.md              client.js 顶层函数索引（npm run map 生成）
 ```
 
-没有构建步骤：`lib/` 是手写的、可直接运行的 JS，唯一 `require()` 是 `react`。设置页用 `createElement` 手写，任务窗是纯 DOM + 内联样式，零依赖。
+`lib/client.js` 是**构建产物**：改 `src/client/`，跑 `npm run build`，产物与源码同一条提交。产物仍满足 loader 的单文件契约（一个 `window.__ModuleLoader__.load({ id, factory })`），唯一 `require()` 是 `react`。设置页用 `createElement` 手写，任务窗是纯 DOM + 内联样式，运行时零依赖。
 
 ## 开发
 
 ```sh
-npm test                    # node --check 两个入口 + 行为自测
+npm install                 # 首次：装 rollup
+npm run build               # src/client/ → lib/client.js
+npm test                    # 产物核对 + node --check + 行为自测
 npm run test:behavior       # 只跑假 DOM + 虚拟时钟行为自测
 ```
 
-提交前 pre-commit 会跑 `npm test`。改代码前先按 [MAP.md](MAP.md) 查行号、再读那一段，不要从头读两万行。应用只在启动时读 `lib/client.js`，改完需要重启才看得到。其余约定见 [AGENTS.md](AGENTS.md)。
+提交前 pre-commit 会跑 `npm test`：源码改了却没重新构建，这一步先失败。改代码前先按 [MAP.md](MAP.md) 查行号、再读 `src/client/` 里那一段。应用只在启动时读 `lib/client.js`，所以改完要先 build、再重启才看得到。其余约定见 [AGENTS.md](AGENTS.md)。
 
 ## 调试
 

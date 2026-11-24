@@ -27,7 +27,8 @@
     }
   },
   "scripts": {
-    "check:syntax": "node --check lib/client.js && node --check lib/index.js",
+    "build": "node scripts/build.mjs",
+    "check:syntax": "node scripts/build.mjs --verify && node --check lib/client.js && node --check lib/index.js",
     "map": "node tools/map.mjs",
     "test": "npm run check:syntax && node tools/selftest.mjs",
     "test:behavior": "node tools/selftest.mjs"
@@ -38,5 +39,8 @@
     "dsh.plugin.json",
     "README.md",
     "CHANGELOG.md"
-  ]
+  ],
+  "devDependencies": {
+    "rollup": "4.68.8"
+  }
 }
