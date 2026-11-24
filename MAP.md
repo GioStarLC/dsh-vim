@@ -2,7 +2,7 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，30 个文件，557 个顶层函数。
+源码：`src/client/`，31 个文件，557 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
@@ -168,6 +168,18 @@
 | src/client/board-notes.js | 215 | revealBoardCard | Bring one card into view, without moving the paper any further than it |
 | src/client/board-notes.js | 238 | watchForks | Watch the sessions service for forks, so a branch made anywhere in the |
 | src/client/board-notes.js | 277 | addBoardGoal | Stand a new goal on the canvas, ready to be given a purpose. |
+| src/client/board-pages.js | 31 | BoardPage | The board as the main panel's page. |
+| src/client/board-pages.js | 66 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
+| src/client/board-pages.js | 111 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
+| src/client/board-pages.js | 175 | overviewToday | What today did, as the overview reads it. |
+| src/client/board-pages.js | 268 | overviewFigure | One figure: the number, and what it counts, read as one block. |
+| src/client/board-pages.js | 286 | overviewNumber | One number in the table: how it reads depends on what it counts. |
+| src/client/board-pages.js | 295 | overviewHeading | One heading of the table, in the same columns as its rows. |
+| src/client/board-pages.js | 313 | mountOverviewInto | Build the overview into an element the host owns. |
+| src/client/board-pages.js | 445 | OverviewPage | The overview as the main panel's page. |
+| src/client/board-pages.js | 481 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
+| src/client/board-pages.js | 527 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
+| src/client/board-pages.js | 584 | installWindowCSS | The rules every window this plugin mounts shares, once. |
 | src/client/board-sheet.js | 27 | closeNewSessionSheet | Take the new-conversation sheet down, and forget what it was writing. |
 | src/client/board-sheet.js | 52 | paintNewSessionBusy | Put the sheet's confirm button in step with the one host round trip. |
 | src/client/board-sheet.js | 68 | paintNewSessionModel | Say which model the sheet would start the conversation on. |
@@ -357,46 +369,34 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 104 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
-| src/client/index.js | 117 | onKeyDown | } |
-| src/client/index.js | 527 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
-| src/client/index.js | 553 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
-| src/client/index.js | 578 | onPointerMove | Remember where the pointer is. |
-| src/client/index.js | 599 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
-| src/client/index.js | 604 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
-| src/client/index.js | 623 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
-| src/client/index.js | 642 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
-| src/client/index.js | 667 | dismissOutsidePress | Put an open window away when the press landed beside it. |
-| src/client/index.js | 693 | pressMissesWindow | Whether a press landed outside an open window's card. |
-| src/client/index.js | 709 | activateSession | Switch the main view to one conversation. |
-| src/client/index.js | 740 | toggleBoard | The board the plugin opens when a page is not available. |
-| src/client/index.js | 753 | showBoard | } |
-| src/client/index.js | 777 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
-| src/client/index.js | 801 | pointInSelection | Whether one right press landed inside the words the reader selected. |
-| src/client/index.js | 842 | onContextMenu | The way back from a conversation: a right press on its page. |
-| src/client/index.js | 887 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
-| src/client/index.js | 919 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
-| src/client/index.js | 1014 | makeTranslator | Translate through the locale seat when it is wired, else through the |
-| src/client/index.js | 1030 | KeyRow | One rebindable key: focus the box, press the key you want. |
-| src/client/index.js | 1070 | SliderRow | One numeric preference. |
-| src/client/index.js | 1100 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
-| src/client/index.js | 1146 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
-| src/client/index.js | 1339 | VimSection | The whole Settings → Vim scrolling page. |
-| src/client/index.js | 1579 | BoardPage | The board as the main panel's page. |
-| src/client/index.js | 1614 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
-| src/client/index.js | 1659 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
-| src/client/index.js | 1723 | overviewToday | What today did, as the overview reads it. |
-| src/client/index.js | 1816 | overviewFigure | One figure: the number, and what it counts, read as one block. |
-| src/client/index.js | 1834 | overviewNumber | One number in the table: how it reads depends on what it counts. |
-| src/client/index.js | 1843 | overviewHeading | One heading of the table, in the same columns as its rows. |
-| src/client/index.js | 1861 | mountOverviewInto | Build the overview into an element the host owns. |
-| src/client/index.js | 1993 | OverviewPage | The overview as the main panel's page. |
-| src/client/index.js | 2029 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
-| src/client/index.js | 2075 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
-| src/client/index.js | 2132 | installWindowCSS | The rules every window this plugin mounts shares, once. |
-| src/client/index.js | 2169 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
-| src/client/index.js | 2245 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 2591 | apply | Client activation. |
+| src/client/index.js | 105 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
+| src/client/index.js | 118 | onKeyDown | } |
+| src/client/index.js | 528 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
+| src/client/index.js | 554 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
+| src/client/index.js | 579 | onPointerMove | Remember where the pointer is. |
+| src/client/index.js | 600 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
+| src/client/index.js | 605 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
+| src/client/index.js | 624 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
+| src/client/index.js | 643 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
+| src/client/index.js | 668 | dismissOutsidePress | Put an open window away when the press landed beside it. |
+| src/client/index.js | 694 | pressMissesWindow | Whether a press landed outside an open window's card. |
+| src/client/index.js | 710 | activateSession | Switch the main view to one conversation. |
+| src/client/index.js | 738 | toggleBoard | The board the plugin opens when a page is not available. |
+| src/client/index.js | 751 | showBoard | } |
+| src/client/index.js | 775 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
+| src/client/index.js | 799 | pointInSelection | Whether one right press landed inside the words the reader selected. |
+| src/client/index.js | 840 | onContextMenu | The way back from a conversation: a right press on its page. |
+| src/client/index.js | 885 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
+| src/client/index.js | 917 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
+| src/client/index.js | 1012 | makeTranslator | Translate through the locale seat when it is wired, else through the |
+| src/client/index.js | 1028 | KeyRow | One rebindable key: focus the box, press the key you want. |
+| src/client/index.js | 1068 | SliderRow | One numeric preference. |
+| src/client/index.js | 1098 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
+| src/client/index.js | 1144 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
+| src/client/index.js | 1337 | VimSection | The whole Settings → Vim scrolling page. |
+| src/client/index.js | 1573 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
+| src/client/index.js | 1649 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
+| src/client/index.js | 1995 | apply | Client activation. |
 | src/client/model-picker.js | 118 | openNewSessionModelPick | Open the model window for the sheet's model row. |
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |
