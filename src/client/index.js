@@ -29,6 +29,9 @@
  * assembles it. The host must mount the `dsh-vim` row for it to reach the page.
  */
 import React from 'react'
+import { renameSession, archiveSession } from './session-actions.js'
+import { failureText, refusal, archiveFailureText } from './errors.js'
+import { PHASES_MODEL } from './phases.js'
 import { watchEntries, stopEntries, cancelEntry, armEntry, clearEntryArm } from './entry.js'
 import { requestTurns as requestTurnCounts, drainPeeks as drainTurnPeeks, cancelPeeks as cancelTurnCounts, turnsOf } from './turns.js'
 import { setDeliveryHook, RUNS, watchRuns, loadRunStamps, forgetRuns, runSince, elapsedText, attentionOf } from './runs.js'
@@ -1137,138 +1140,6 @@ import {
       statuses: '',
       unsubscribes: [],
     }
-
-    /**
-     * The stage of each conversation, as this plugin's own idea of it.
-     *
-     * This is the stage module proper, and it is deliberately self-contained:
-     * it holds `id -> phase` (one of PHASES), persists it, and answers reads.
-     * It knows nothing of where a stage came from and nothing of the chip that
-     * shows it. A SOURCE writes a stage in (today the only source is a hand
-     * press, see the window's stage key and the chip click; a goal projection
-     * or an agent-written mark could be added later as another source without
-     * touching this ledger), and the chip reads one out — the two never meet.
-     *
-     * Persisted under PHASES_KEY so a stage survives a page reload, a plugin
-     * reload, and a renderer restart, the same promise the run clock keeps.
-     */
-    var PHASES_MODEL = makePhaseLedger()
-
-    /**
-     * The ledger behind `PHASES_MODEL`, and the only thing that touches the
-     * store. Read through `get`, write through `set`, `cycle`, and `clear`;
-     * `load()` reads the previous page's map back once per activation.
-     *
-     * A value outside PHASES is treated as no stage: a hand-edited store, or a
-     * vocabulary that shrank between versions, can never make a row show a
-     * stage this build does not know how to label.
-     * @returns {object} the ledger.
-     */
-    function makePhaseLedger() {
-      /** id -> phase; only PHASES members are ever stored. */
-      var map = Object.create(null)
-      /** The last serialized map written, so an unchanged one is not rewritten. */
-      var written = ''
-
-      /** Write the map back; a storage failure is not fatal. */
-      function persist() {
-        var serialized = JSON.stringify(map)
-        if (serialized === written) return
-        written = serialized
-        try {
-          window.localStorage.setItem(PHASES_KEY, serialized)
-        } catch (error) {
-          console.warn('[dsh-vim] could not persist stages', error)
-        }
-      }
-
-      return {
-        /**
-         * The stage of one conversation, or '' when none is marked.
-         * @param {string} id - session id.
-         * @returns {string} a PHASES member, or '' for idle.
-         */
-        get(id) {
-          if (!id) return ''
-          var value = map[id]
-          return PHASES.indexOf(value) >= 0 ? value : ''
-        },
-        /**
-         * Set one conversation's stage. A value outside PHASES clears it, so a
-         * source can pass '' or 'idle' to mean "no stage".
-         * @param {string} id - session id.
-         * @param {string} phase - a PHASES member, or anything else to clear.
-         * @returns {string} the stage now in effect ('' when cleared).
-         */
-        set(id, phase) {
-          if (!id) return ''
-          if (PHASES.indexOf(phase) < 0) {
-            if (map[id] !== undefined) {
-              delete map[id]
-              persist()
-            }
-            return ''
-          }
-          if (map[id] !== phase) {
-            map[id] = phase
-            persist()
-          }
-          return phase
-        },
-        /**
-         * Advance one conversation to the next stage in the cycle. Off the last
-         * member it lands on idle (cleared); off idle it lands on the first.
-         * @param {string} id - session id.
-         * @returns {string} the stage now in effect ('' when it cycled to idle).
-         */
-        cycle(id) {
-          if (!id) return ''
-          var current = this.get(id)
-          var at = PHASES.indexOf(current)
-          // -1 (idle) -> 0; last -> length (one past the end) -> idle.
-          var nextAt = at + 1
-          return this.set(id, nextAt >= PHASES.length ? '' : PHASES[nextAt])
-        },
-        /** Drop one conversation's stage. */
-        clear(id) {
-          return this.set(id, '')
-        },
-        /** The whole map as a plain object, for the debug surface. */
-        all() {
-          var out = {}
-          for (var id in map) {
-            if (Object.prototype.hasOwnProperty.call(map, id)) out[id] = map[id]
-          }
-          return out
-        },
-        /** Drop every stage (debug reset). */
-        reset() {
-          map = Object.create(null)
-          persist()
-        },
-        /** Read the previous page's map back, keeping only known PHASES. */
-        load() {
-          var parsed = null
-          try {
-            var raw = window.localStorage.getItem(PHASES_KEY)
-            parsed = raw ? JSON.parse(raw) : null
-          } catch (error) {
-            parsed = null
-          }
-          map = Object.create(null)
-          if (parsed && typeof parsed === 'object') {
-            for (var id in parsed) {
-              if (!Object.prototype.hasOwnProperty.call(parsed, id)) continue
-              if (PHASES.indexOf(parsed[id]) >= 0) map[id] = parsed[id]
-            }
-          }
-          written = ''
-          persist()
-        },
-      }
-    }
-
-
 
     /**
      * How often the live clocks repaint: one minute, which is the resolution
@@ -4991,118 +4862,6 @@ import {
     }
 
     /**
-     * Rename one conversation, the way the shell's own sidebar does it: retain
-     * the session under this plugin's private source, call the binding, release.
-     * The source must not be `mainView`, for the reason spelled out on
-     * PEEK_SOURCE — renaming a row must not mark it read.
-     * @param {string} id - session id.
-     * @param {string} title - the new name.
-     * @param {function(string|null):void} done - the reason on failure, else null.
-     * @returns {void}
-     */
-    function renameSession(id, title, done) {
-      var services = taskServices()
-      var sessions = services && services.controller
-      if (!sessions || typeof sessions.using !== 'function') {
-        done(paletteText('renameUnavailable'))
-        return
-      }
-      var settled = false
-      function finish(reason) {
-        if (settled) return
-        settled = true
-        done(reason)
-      }
-      try {
-        var pending = sessions.using(id, { source: PEEK_SOURCE }, function (reference) {
-          var session = reference && reference.binding && reference.binding.session
-          if (!session || typeof session.rename !== 'function') return { ok: false, error: null }
-          return session.rename(title)
-        })
-        Promise.resolve(pending).then(
-          function (result) {
-            finish(result && result.ok ? null : failureText(result))
-          },
-          function (error) {
-            finish(failureText(error))
-          }
-        )
-      } catch (error) {
-        finish(failureText(error))
-      }
-    }
-
-    /**
-     * Archive the selected conversation, through the host's own action.
-     *
-     * The one thing this refuses to do is stop a turn. The host's own
-     * `archiveSession` would happily do that for us if we passed
-     * `stopActivity: true`, and the host answers a bare call on a busy session
-     * with `workspace/session-active` naming the work. Both facts are load
-     * bearing here: this plugin does not get to destroy a running task with one
-     * keystroke, which is the same rule Escape already follows. So a session
-     * with work in flight is reported, never stopped — the user can stop it and
-     * press the key again.
-     *
-     * A refusal the host makes for its own reasons is surfaced as it is, so the
-     * message is the host's rather than a guess of ours.
-     * @param {string} id - session id to archive.
-     * @param {function(string|null):void} done - the reason on failure, else null.
-     * @returns {void}
-     */
-    function archiveSession(id, done) {
-      var services = taskServices()
-      var nav = services && services.nav
-      if (!nav || typeof nav.archiveSession !== 'function') {
-        done(paletteText('archiveUnavailable'))
-        return
-      }
-      var settled = false
-      function finish(reason) {
-        if (settled) return
-        settled = true
-        done(reason)
-      }
-      try {
-        // Deliberately no `stopActivity`: the host must refuse a busy session
-        // rather than stop it on our behalf. See the doc comment above.
-        var pending = nav.archiveSession(id, {})
-        Promise.resolve(pending).then(
-          function () {
-            finish(null)
-          },
-          function (error) {
-            finish(archiveFailureText(error))
-          }
-        )
-      } catch (error) {
-        finish(archiveFailureText(error))
-      }
-    }
-
-    /**
-     * A reason from whatever the host rejected an archive with.
-     *
-     * The busy refusal gets a sentence of its own, because it is the one the
-     * user is meant to act on: it is not a fault, and the generic message would
-     * read as one. Everything else is the host's own message, and only falls
-     * back to our wording when the host sent none.
-     * @param {unknown} reason - the rejection.
-     * @returns {string} text for the footer.
-     */
-    function archiveFailureText(reason) {
-      var code = null
-      if (reason && reason.rpcError && reason.rpcError.code) code = String(reason.rpcError.code)
-      else if (reason && reason.error && reason.error.code) code = String(reason.error.code)
-      else if (reason && reason.code) code = String(reason.code)
-      if (code === 'workspace/session-active') return paletteText('archiveActive')
-      if (reason && reason.rpcError && reason.rpcError.message) return String(reason.rpcError.message)
-      if (reason && reason.error && reason.error.message) return String(reason.error.message)
-      if (reason && reason.message) return String(reason.message)
-      return paletteText('archiveFailed')
-    }
-
-    /**
      * Archive the selected row, with the footer saying what happened.
      *
      * The window is left open on purpose. The feed does the removing — the host
@@ -5124,18 +4883,6 @@ import {
         refreshPalette()
       })
       return true
-    }
-
-    /**
-     * A short reason from whatever the host rejected with: a remote failure
-     * carries `{ error: { message } }`, a thrown one carries `message`.
-     * @param {unknown} reason - the rejection.
-     * @returns {string} text for the footer.
-     */
-    function failureText(reason) {
-      if (reason && reason.error && reason.error.message) return String(reason.error.message)
-      if (reason && reason.message) return String(reason.message)
-      return paletteText('renameFailed')
     }
 
     /**
@@ -18975,19 +18722,6 @@ import {
       if (!entry || !here || here.chosen === undefined) return undefined
       if (isCurrentEntry(entry, here)) return here.chosen
       return levelIndex(entry.levels, here.chosen) >= 0 ? here.chosen : undefined
-    }
-
-    /**
-     * A refusal this plugin can explain on its own, so the notice carries
-     * exactly that sentence: "this model offers no levels" needs no "could not
-     * change the level" frame around it, which a host failure does.
-     * @param {string} text - the line to show.
-     * @returns {Error} an error that is its own wording.
-     */
-    function refusal(text) {
-      var error = new Error(text)
-      error.explainsItself = true
-      return error
     }
 
     /**
