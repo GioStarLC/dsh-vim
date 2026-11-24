@@ -405,7 +405,6 @@ function renderModelPick() {
     list.appendChild(buildModelRow(MODELPICK.entries[i], i))
   }
   if (MODELPICK.footer) MODELPICK.footer.textContent = modelPickHint()
-  console.log('[debug-render]', MODELPICK.entries.length, list.children.length)
   keepModelPickVisible()
 }
 
