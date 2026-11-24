@@ -2,10 +2,14 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，32 个文件，566 个顶层函数。
+源码：`src/client/`，33 个文件，566 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
+| src/client/app-actions.js | 25 | activateSession | Switch the main view to one conversation. |
+| src/client/app-actions.js | 53 | toggleBoard | The board the plugin opens when a page is not available. |
+| src/client/app-actions.js | 66 | showBoard | } |
+| src/client/app-actions.js | 90 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
 | src/client/board-canvas.js | 32 | workspaceForGoal | The workspace a new conversation started from one goal would join. |
 | src/client/board-canvas.js | 61 | boardBlockByKey | One goal of the last paint, by the key a card is filed under. |
 | src/client/board-canvas.js | 93 | goalByKey | The canvas as it is drawn: one block per workspace in play, the |
@@ -369,25 +373,21 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 106 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
-| src/client/index.js | 119 | onKeyDown | } |
-| src/client/index.js | 529 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
-| src/client/index.js | 555 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
-| src/client/index.js | 580 | onPointerMove | Remember where the pointer is. |
-| src/client/index.js | 601 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
-| src/client/index.js | 606 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
-| src/client/index.js | 625 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
-| src/client/index.js | 644 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
-| src/client/index.js | 669 | dismissOutsidePress | Put an open window away when the press landed beside it. |
-| src/client/index.js | 695 | pressMissesWindow | Whether a press landed outside an open window's card. |
-| src/client/index.js | 711 | activateSession | Switch the main view to one conversation. |
-| src/client/index.js | 739 | toggleBoard | The board the plugin opens when a page is not available. |
-| src/client/index.js | 752 | showBoard | } |
-| src/client/index.js | 776 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
-| src/client/index.js | 800 | pointInSelection | Whether one right press landed inside the words the reader selected. |
-| src/client/index.js | 841 | onContextMenu | The way back from a conversation: a right press on its page. |
-| src/client/index.js | 854 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 1200 | apply | Client activation. |
+| src/client/index.js | 107 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
+| src/client/index.js | 120 | onKeyDown | } |
+| src/client/index.js | 530 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
+| src/client/index.js | 556 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
+| src/client/index.js | 581 | onPointerMove | Remember where the pointer is. |
+| src/client/index.js | 602 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
+| src/client/index.js | 607 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
+| src/client/index.js | 626 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
+| src/client/index.js | 645 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
+| src/client/index.js | 670 | dismissOutsidePress | Put an open window away when the press landed beside it. |
+| src/client/index.js | 696 | pressMissesWindow | Whether a press landed outside an open window's card. |
+| src/client/index.js | 713 | pointInSelection | Whether one right press landed inside the words the reader selected. |
+| src/client/index.js | 754 | onContextMenu | The way back from a conversation: a right press on its page. |
+| src/client/index.js | 767 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
+| src/client/index.js | 1113 | apply | Client activation. |
 | src/client/model-picker.js | 118 | openNewSessionModelPick | Open the model window for the sheet's model row. |
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |
