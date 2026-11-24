@@ -2,7 +2,7 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，26 个文件，555 个顶层函数。
+源码：`src/client/`，27 个文件，557 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
@@ -155,6 +155,172 @@
 | src/client/board-stores.js | 2282 | keyFor | A key that sorts by the moment it was written, and never collides. |
 | src/client/board-stores.js | 2361 | makeCarryStore | } |
 | src/client/board-stores.js | 2366 | read | What is stored, reduced to `id -> {from, title, goal}`. |
+| src/client/board-ui.js | 46 | beginBoardNote | Start typing the line on one card. |
+| src/client/board-ui.js | 59 | commitBoardNote | Keep what the open field says, and close it. |
+| src/client/board-ui.js | 74 | cancelBoardNote | Throw the open field away, leaving the card as it was. |
+| src/client/board-ui.js | 90 | openNote | The note key: open the board on the conversation on screen, with its |
+| src/client/board-ui.js | 127 | pinToBoard | Put one conversation on the board by hand. |
+| src/client/board-ui.js | 157 | cardVerdictOf | What the reader has said about a conversation, if it still applies. |
+| src/client/board-ui.js | 175 | noteCardFinished | Write down that a turn ended, before the shell forgets it did. |
+| src/client/board-ui.js | 191 | rememberFork | Record a fork this plugin watched, and repaint a board that is up. |
+| src/client/board-ui.js | 215 | inheritForkHome | File a branch in the goal its parent is in. |
+| src/client/board-ui.js | 238 | revealBoardCard | Bring one card into view, without moving the paper any further than it |
+| src/client/board-ui.js | 261 | watchForks | Watch the sessions service for forks, so a branch made anywhere in the |
+| src/client/board-ui.js | 300 | addBoardGoal | Stand a new goal on the canvas, ready to be given a purpose. |
+| src/client/board-ui.js | 323 | openBoard | Mount the board. |
+| src/client/board-ui.js | 372 | mountBoardInto | Build the board's parts into a root element, whichever mount owns it. |
+| src/client/board-ui.js | 683 | unmountBoard | Unmount the board, whichever mount holds it. |
+| src/client/board-ui.js | 789 | closeBoard | Take the floating board down, element and all. |
+| src/client/board-ui.js | 816 | boardFieldOpen | Repaint the whole canvas from the feeds. |
+| src/client/board-ui.js | 842 | renderBoard | } |
+| src/client/board-ui.js | 1065 | boardStatusFingerprint | The board's reading of every card's status, as one string. |
+| src/client/board-ui.js | 1086 | renderBoardOnStatus | Repaint the board for a status tick, but only if something on screen |
+| src/client/board-ui.js | 1101 | tickBoardClocks | Move the running cards' minute hands, in place. |
+| src/client/board-ui.js | 1124 | startDayTimer | Arm the one timer that watches for midnight. |
+| src/client/board-ui.js | 1139 | stopDayTimer | Stop the midnight timer: the board closed, or the page went away. |
+| src/client/board-ui.js | 1146 | startBoardClock | Start the tick that keeps the board's clocks honest. |
+| src/client/board-ui.js | 1157 | stopBoardClock | Stop the tick: the board closed, or nothing on it is running. |
+| src/client/board-ui.js | 1179 | paintHistory | Paint the "only what is marked" toggle to match the state it stands for. |
+| src/client/board-ui.js | 1194 | paintBoardStarFilter | } |
+| src/client/board-ui.js | 1210 | raiseBoardCard | Bring one card to the front of the paper. |
+| src/client/board-ui.js | 1230 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
+| src/client/board-ui.js | 1280 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
+| src/client/board-ui.js | 1299 | markDoneDrop | Light the finished strip a carried conversation would land in. |
+| src/client/board-ui.js | 1316 | sendToDone | Put one conversation in the finished strip, word and all. |
+| src/client/board-ui.js | 1333 | bringBackFromDone | Take one conversation back out of the finished strip, word and all. |
+| src/client/board-ui.js | 1352 | markNoDrop | Say, under the hand, that the paper will not take this card. |
+| src/client/board-ui.js | 1378 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
+| src/client/board-ui.js | 1395 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
+| src/client/board-ui.js | 1433 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
+| src/client/board-ui.js | 1460 | boardDragText | } |
+| src/client/board-ui.js | 1478 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
+| src/client/board-ui.js | 1495 | onNativeDragEnd | A native drag is over, however it ended. |
+| src/client/board-ui.js | 1509 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
+| src/client/board-ui.js | 1525 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
+| src/client/board-ui.js | 1545 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
+| src/client/board-ui.js | 1572 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
+| src/client/board-ui.js | 1595 | buildSeatMenu | The twelve colours a goal can wear. |
+| src/client/board-ui.js | 1628 | pickSeat | One colour, as a press. |
+| src/client/board-ui.js | 1653 | buildGoalMenu | The verbs on a goal that are not worth a seat of their own. |
+| src/client/board-ui.js | 1676 | goalMenuItem | One line of that menu. |
+| src/client/board-ui.js | 1707 | placeGoalMenu | Stand a goal's menu under its ⋯, inside the panel's right edge. |
+| src/client/board-ui.js | 1712 | buildBoardBlock | } |
+| src/client/board-ui.js | 2123 | trayCaption | The conversations of one block, cut into threads. |
+| src/client/board-ui.js | 2138 | trayQuiet | A quiet line where a section has nothing in it yet. |
+| src/client/board-ui.js | 2156 | buildTrayNote | One note, as a line of the tray. |
+| src/client/board-ui.js | 2304 | trayInk | Ink every conversation inside one node with the tray's paper. |
+| src/client/board-ui.js | 2316 | doneBinCards | Every note put away in the finished-cards bin, newest first. |
+| src/client/board-ui.js | 2321 | doneBinCardsOf | The put-away notes one conversation was handed, newest first. |
+| src/client/board-ui.js | 2340 | openDoneBinFor | Open the bin on one conversation's own put-aways. |
+| src/client/board-ui.js | 2355 | paintDoneBin | Say how many cards the bin holds, and what it is doing. |
+| src/client/board-ui.js | 2370 | toggleDoneBin | Open or close the finished-cards list. |
+| src/client/board-ui.js | 2388 | buildDoneRow | One finished note, as a line of the card's list. |
+| src/client/board-ui.js | 2475 | mountDoneBin | Put the finished-cards list on the board, or take it away. |
+| src/client/board-ui.js | 2563 | ejectFromDoneBin | Put one card back on the paper, out of the finished-cards bin. |
+| src/client/board-ui.js | 2582 | buildInboxBody | The tray's body: the conversations nothing accounts for, and the notes put away here. |
+| src/client/board-ui.js | 2639 | buildBoardColumns | A goal's conversations, laid out across the panel. |
+| src/client/board-ui.js | 2681 | buildBoardColumn | One conversation of a panel, as the column it stands in. |
+| src/client/board-ui.js | 2709 | buildDoneBar | The long strip at the foot of a goal: what the reader finished today. |
+| src/client/board-ui.js | 2788 | buildQuietStrip | The conversations a panel carried in and nobody has touched, one line each. |
+| src/client/board-ui.js | 2844 | buildQuietRow | One quiet conversation, as the line it is drawn as. |
+| src/client/board-ui.js | 2916 | buildQuietStack | The thoughts under one quiet conversation, once its count was pressed. |
+| src/client/board-ui.js | 2935 | buildBoardStack | The thoughts filed under one conversation. |
+| src/client/board-ui.js | 3001 | markCardFresh | Wear the one beat a completion is worth - once. |
+| src/client/board-ui.js | 3039 | verdictText | The word one conversation wears, in the reader's language. |
+| src/client/board-ui.js | 3056 | buildVerdictChip | What the reader said about a card, as the chip that says it. |
+| src/client/board-ui.js | 3083 | buildStateAdd | The empty seat, for a card the shell has nothing to say about. |
+| src/client/board-ui.js | 3103 | stateToggle | Open or close one card's state menu. |
+| src/client/board-ui.js | 3124 | buildVerdictMenu | The two words, and the way back to having said nothing. |
+| src/client/board-ui.js | 3144 | verdictItem | One word in that menu. |
+| src/client/board-ui.js | 3177 | clearVerdictItem | The row that takes the word back. |
+| src/client/board-ui.js | 3197 | buildBoardCard | } |
+| src/client/board-ui.js | 3665 | beginBlockRename | Start typing a goal's name into its heading. |
+| src/client/board-ui.js | 3671 | commitBlockRename | Keep the name the heading says, and close the field. |
+| src/client/board-ui.js | 3683 | cancelBlockRename | Throw the typed name away, leaving the goal as it was called. |
+| src/client/board-ui.js | 3700 | goalBaseName | The last piece of a workspace path: what the workspace is called. |
+| src/client/board-ui.js | 3713 | beginGoalIntent | Start writing what a goal is for. |
+| src/client/board-ui.js | 3728 | commitGoalIntent | Keep what the open line says, and close it. |
+| src/client/board-ui.js | 3740 | cancelGoalIntent | Throw the typed line away, leaving the goal as it was. |
+| src/client/board-ui.js | 3759 | removeBoardGoal | Take one goal off the canvas, with a few seconds to bring it back. |
+| src/client/board-ui.js | 3806 | boardNameCollisions | Which drawn cards share a name, and where each one stands in its group. |
+| src/client/board-ui.js | 3836 | noteCardTitle | Put the reader's word on a card before the shell has answered. |
+| src/client/board-ui.js | 3851 | settleTitles | Let go of the stand-in names the feed has caught up with, or outlived. |
+| src/client/board-ui.js | 3870 | beginBoardRename | Start renaming one conversation from its card. |
+| src/client/board-ui.js | 3888 | commitBoardRename | Keep what the open name field says, and rename the conversation. |
+| src/client/board-ui.js | 3927 | cancelBoardRename | Throw the open name field away, leaving the conversation as it was. |
+| src/client/board-ui.js | 3946 | forkBoardCard | Start a branch from one conversation, and draw the line when it lands. |
+| src/client/board-ui.js | 3992 | returnForkMark | Let a conversation's branch mark answer again, and say so on the card. |
+| src/client/board-ui.js | 4008 | waitForBranchRow | The catalogue row for one conversation, asked for until it arrives. |
+| src/client/board-ui.js | 4040 | settleBranchName | Give a fresh branch a name nobody else is using, and answer with it. |
+| src/client/board-ui.js | 4083 | pasteIntoComposer | Put words in the message box of the conversation on screen. |
+| src/client/board-ui.js | 4088 | putInBox | putInBox() |
+| src/client/board-ui.js | 4117 | composerHasText | Whether the message box already holds something. |
+| src/client/board-ui.js | 4133 | boxHasText | Whether one box already holds words. |
+| src/client/board-ui.js | 4148 | seatCaretAtEnd | Put the caret at the end of the box's content. |
+| src/client/board-ui.js | 4187 | dropCardIntoComposer | Hand one loose card's words to a conversation's message box. |
+| src/client/board-ui.js | 4207 | pasteIntoBoxNow | Put the words in the box that is on screen right now, if there is one. |
+| src/client/board-ui.js | 4229 | putThroughEditor | Put text into the editor through the editing command. |
+| src/client/board-ui.js | 4248 | pasteThroughEvent | Put text into the editor as a real paste event. |
+| src/client/board-ui.js | 4274 | ideaFocusCard | One card from the board's own document, by id. |
+| src/client/board-ui.js | 4294 | ideaFocusOrigin | Where a press happened, as a point the sheet can grow out of. |
+| src/client/board-ui.js | 4319 | animateIdeaFocusIn | Let the sheet grow out of the place the reader pointed at. |
+| src/client/board-ui.js | 4334 | step | var started = 0 |
+| src/client/board-ui.js | 4362 | ideaFocusSessionTitle | The name of the conversation a thought is tied to, for the sheet's foot. |
+| src/client/board-ui.js | 4383 | paintIdeaFocusDone | Keep the sheet's done box in step with the card it belongs to. |
+| src/client/board-ui.js | 4404 | cleanIdeaTitle | Keep the title on one line while letting it wrap on the paper. |
+| src/client/board-ui.js | 4412 | growIdeaTitle | Let the title field take as many lines as the words it is showing. |
+| src/client/board-ui.js | 4431 | writeIdeaFocus | Write what the sheet says into the card it belongs to. |
+| src/client/board-ui.js | 4455 | openIdeaFocus | Open one idea card, or a blank new one, in the centre of the board. |
+| src/client/board-ui.js | 4699 | closeIdeaFocus | Close the sheet, keeping what it says. |
+| src/client/board-ui.js | 4750 | deliverIdeaFocus | Hand the sheet's thought to the conversation it is tied to. |
+| src/client/board-ui.js | 4774 | buildIdeaMenu | The menu behind a thought card's ⋯. |
+| src/client/board-ui.js | 4817 | ideaMenuItem | One line of that menu. |
+| src/client/board-ui.js | 4846 | buildSessionMenu | The verbs on a conversation card that are not worth a seat of their own. |
+| src/client/board-ui.js | 4887 | placeCardMenu | One line of that menu. |
+| src/client/board-ui.js | 4904 | cardMenuItem | } |
+| src/client/board-ui.js | 4943 | buildBoardLooseCard | One loose card: a thought the reader put on the canvas rather than in a |
+| src/client/board-ui.js | 5293 | beginBoardCard | Start typing into one loose card - at its title, or at its body. |
+| src/client/board-ui.js | 5333 | boardTakeCardText | Keep what the open field says, and close it. |
+| src/client/board-ui.js | 5350 | commitBoardCard | } |
+| src/client/board-ui.js | 5363 | cancelBoardCard | Throw the open field away, leaving the card as it was last written. |
+| src/client/board-ui.js | 5384 | settleBoardCardForPress | Settle the open card field for a press, without the paint a settle |
+| src/client/board-ui.js | 5407 | addBoardCardAt | Open a new thought at a place, and let the sheet write it. |
+| src/client/board-ui.js | 5424 | addBoardCard | Open a new thought where the reader is looking, or below everything when |
+| src/client/board-ui.js | 5441 | removeLooseCard | Take one loose card off the canvas. |
+| src/client/board-ui.js | 5486 | removeBoardCard | Take one conversation off the board. |
+| src/client/board-ui.js | 5528 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
+| src/client/board-ui.js | 5557 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
+| src/client/board-ui.js | 5596 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
+| src/client/board-ui.js | 5624 | closeIdeaMenu | Mark the column the hand is over, or clear every mark. |
+| src/client/board-ui.js | 5641 | closeSeatMenu | Put the colour wheel away, without a repaint. |
+| src/client/board-ui.js | 5661 | closeGoalMenu | Put a goal's ⋯ menu away, without a repaint. |
+| src/client/board-ui.js | 5681 | closeVerdictMenu | Put a card's state menu away, without a repaint. |
+| src/client/board-ui.js | 5700 | closeSessionMenu | Put a conversation card's menu away, without a repaint. |
+| src/client/board-ui.js | 5716 | paintStackDrop | } |
+| src/client/board-ui.js | 5734 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
+| src/client/board-ui.js | 5753 | parkCardOutside | Give a card lifted out of a column a place on the paper. |
+| src/client/board-ui.js | 5780 | boardPointerDown | The one press handler on the canvas. |
+| src/client/board-ui.js | 5932 | boardNoteDone | Put the drop bands on screen, or take them away. |
+| src/client/board-ui.js | 5940 | showDropZones | } |
+| src/client/board-ui.js | 5955 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
+| src/client/board-ui.js | 5972 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
+| src/client/board-ui.js | 5990 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
+| src/client/board-ui.js | 6008 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
+| src/client/board-ui.js | 6067 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
+| src/client/board-ui.js | 6105 | sessionSlotAt | The place the hand is asking for, read off the grid. |
+| src/client/board-ui.js | 6151 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
+| src/client/board-ui.js | 6164 | resetSessionReorder | Put every column back where the paint left it. |
+| src/client/board-ui.js | 6190 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
+| src/client/board-ui.js | 6228 | beginSessionCarrier | Give a carried card its body, where the hand is. |
+| src/client/board-ui.js | 6268 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
+| src/client/board-ui.js | 6389 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
+| src/client/board-ui.js | 6667 | handCardToSession | Hand one loose card's words to a conversation, and leave a trace behind. |
+| src/client/board-ui.js | 6693 | nameSessionForCard | Let the conversation a card was handed to wear the card's own name. |
+| src/client/board-ui.js | 6723 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
+| src/client/board-ui.js | 6779 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
+| src/client/board-ui.js | 6789 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
+| src/client/board-ui.js | 6835 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
+| src/client/board-ui.js | 6850 | onBoardDoubleClick | A double click on the paper: write a card right there. |
 | src/client/dom.js | 14 | isEditable | True when the element consumes printable characters itself. |
 | src/client/dom.js | 28 | isScrollable | True when the element is a non-editable box that overflows vertically and |
 | src/client/dom.js | 41 | parentOf | Parent element, crossing shadow boundaries through the host node. |
@@ -191,210 +357,46 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 100 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
-| src/client/index.js | 113 | onKeyDown | } |
-| src/client/index.js | 523 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
-| src/client/index.js | 549 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
-| src/client/index.js | 574 | onPointerMove | Remember where the pointer is. |
-| src/client/index.js | 595 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
-| src/client/index.js | 600 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
-| src/client/index.js | 619 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
-| src/client/index.js | 638 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
-| src/client/index.js | 663 | dismissOutsidePress | Put an open window away when the press landed beside it. |
-| src/client/index.js | 689 | pressMissesWindow | Whether a press landed outside an open window's card. |
-| src/client/index.js | 705 | activateSession | Switch the main view to one conversation. |
-| src/client/index.js | 736 | toggleBoard | The board the plugin opens when a page is not available. |
-| src/client/index.js | 749 | showBoard | } |
-| src/client/index.js | 773 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
-| src/client/index.js | 797 | pointInSelection | Whether one right press landed inside the words the reader selected. |
-| src/client/index.js | 838 | onContextMenu | The way back from a conversation: a right press on its page. |
-| src/client/index.js | 858 | beginBoardNote | Start typing the line on one card. |
-| src/client/index.js | 871 | commitBoardNote | Keep what the open field says, and close it. |
-| src/client/index.js | 886 | cancelBoardNote | Throw the open field away, leaving the card as it was. |
-| src/client/index.js | 902 | openNote | The note key: open the board on the conversation on screen, with its |
-| src/client/index.js | 939 | pinToBoard | Put one conversation on the board by hand. |
-| src/client/index.js | 969 | cardVerdictOf | What the reader has said about a conversation, if it still applies. |
-| src/client/index.js | 987 | noteCardFinished | Write down that a turn ended, before the shell forgets it did. |
-| src/client/index.js | 1003 | rememberFork | Record a fork this plugin watched, and repaint a board that is up. |
-| src/client/index.js | 1027 | inheritForkHome | File a branch in the goal its parent is in. |
-| src/client/index.js | 1050 | revealBoardCard | Bring one card into view, without moving the paper any further than it |
-| src/client/index.js | 1073 | watchForks | Watch the sessions service for forks, so a branch made anywhere in the |
-| src/client/index.js | 1112 | addBoardGoal | Stand a new goal on the canvas, ready to be given a purpose. |
-| src/client/index.js | 1135 | openBoard | Mount the board. |
-| src/client/index.js | 1184 | mountBoardInto | Build the board's parts into a root element, whichever mount owns it. |
-| src/client/index.js | 1495 | unmountBoard | Unmount the board, whichever mount holds it. |
-| src/client/index.js | 1601 | closeBoard | Take the floating board down, element and all. |
-| src/client/index.js | 1628 | boardFieldOpen | Repaint the whole canvas from the feeds. |
-| src/client/index.js | 1654 | renderBoard | } |
-| src/client/index.js | 1877 | boardStatusFingerprint | The board's reading of every card's status, as one string. |
-| src/client/index.js | 1898 | renderBoardOnStatus | Repaint the board for a status tick, but only if something on screen |
-| src/client/index.js | 1913 | tickBoardClocks | Move the running cards' minute hands, in place. |
-| src/client/index.js | 1936 | startDayTimer | Arm the one timer that watches for midnight. |
-| src/client/index.js | 1951 | stopDayTimer | Stop the midnight timer: the board closed, or the page went away. |
-| src/client/index.js | 1958 | startBoardClock | Start the tick that keeps the board's clocks honest. |
-| src/client/index.js | 1969 | stopBoardClock | Stop the tick: the board closed, or nothing on it is running. |
-| src/client/index.js | 1991 | paintHistory | Paint the "only what is marked" toggle to match the state it stands for. |
-| src/client/index.js | 2006 | paintBoardStarFilter | } |
-| src/client/index.js | 2022 | raiseBoardCard | Bring one card to the front of the paper. |
-| src/client/index.js | 2042 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
-| src/client/index.js | 2092 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
-| src/client/index.js | 2111 | markDoneDrop | Light the finished strip a carried conversation would land in. |
-| src/client/index.js | 2128 | sendToDone | Put one conversation in the finished strip, word and all. |
-| src/client/index.js | 2145 | bringBackFromDone | Take one conversation back out of the finished strip, word and all. |
-| src/client/index.js | 2164 | markNoDrop | Say, under the hand, that the paper will not take this card. |
-| src/client/index.js | 2190 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
-| src/client/index.js | 2207 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
-| src/client/index.js | 2245 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
-| src/client/index.js | 2272 | boardDragText | } |
-| src/client/index.js | 2290 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
-| src/client/index.js | 2307 | onNativeDragEnd | A native drag is over, however it ended. |
-| src/client/index.js | 2321 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
-| src/client/index.js | 2337 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
-| src/client/index.js | 2357 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
-| src/client/index.js | 2384 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
-| src/client/index.js | 2409 | buildSeatMenu | The twelve colours a goal can wear. |
-| src/client/index.js | 2442 | pickSeat | One colour, as a press. |
-| src/client/index.js | 2467 | buildGoalMenu | The verbs on a goal that are not worth a seat of their own. |
-| src/client/index.js | 2490 | goalMenuItem | One line of that menu. |
-| src/client/index.js | 2521 | placeGoalMenu | Stand a goal's menu under its ⋯, inside the panel's right edge. |
-| src/client/index.js | 2526 | buildBoardBlock | } |
-| src/client/index.js | 2937 | trayCaption | The conversations of one block, cut into threads. |
-| src/client/index.js | 2952 | trayQuiet | A quiet line where a section has nothing in it yet. |
-| src/client/index.js | 2970 | buildTrayNote | One note, as a line of the tray. |
-| src/client/index.js | 3118 | trayInk | Ink every conversation inside one node with the tray's paper. |
-| src/client/index.js | 3130 | doneBinCards | Every note put away in the finished-cards bin, newest first. |
-| src/client/index.js | 3135 | doneBinCardsOf | The put-away notes one conversation was handed, newest first. |
-| src/client/index.js | 3154 | openDoneBinFor | Open the bin on one conversation's own put-aways. |
-| src/client/index.js | 3169 | paintDoneBin | Say how many cards the bin holds, and what it is doing. |
-| src/client/index.js | 3184 | toggleDoneBin | Open or close the finished-cards list. |
-| src/client/index.js | 3202 | buildDoneRow | One finished note, as a line of the card's list. |
-| src/client/index.js | 3289 | mountDoneBin | Put the finished-cards list on the board, or take it away. |
-| src/client/index.js | 3377 | ejectFromDoneBin | Put one card back on the paper, out of the finished-cards bin. |
-| src/client/index.js | 3396 | buildInboxBody | The tray's body: the conversations nothing accounts for, and the notes put away here. |
-| src/client/index.js | 3453 | buildBoardColumns | A goal's conversations, laid out across the panel. |
-| src/client/index.js | 3495 | buildBoardColumn | One conversation of a panel, as the column it stands in. |
-| src/client/index.js | 3523 | buildDoneBar | The long strip at the foot of a goal: what the reader finished today. |
-| src/client/index.js | 3602 | buildQuietStrip | The conversations a panel carried in and nobody has touched, one line each. |
-| src/client/index.js | 3658 | buildQuietRow | One quiet conversation, as the line it is drawn as. |
-| src/client/index.js | 3730 | buildQuietStack | The thoughts under one quiet conversation, once its count was pressed. |
-| src/client/index.js | 3749 | buildBoardStack | The thoughts filed under one conversation. |
-| src/client/index.js | 3815 | markCardFresh | Wear the one beat a completion is worth - once. |
-| src/client/index.js | 3853 | verdictText | The word one conversation wears, in the reader's language. |
-| src/client/index.js | 3870 | buildVerdictChip | What the reader said about a card, as the chip that says it. |
-| src/client/index.js | 3897 | buildStateAdd | The empty seat, for a card the shell has nothing to say about. |
-| src/client/index.js | 3917 | stateToggle | Open or close one card's state menu. |
-| src/client/index.js | 3938 | buildVerdictMenu | The two words, and the way back to having said nothing. |
-| src/client/index.js | 3958 | verdictItem | One word in that menu. |
-| src/client/index.js | 3991 | clearVerdictItem | The row that takes the word back. |
-| src/client/index.js | 4011 | buildBoardCard | } |
-| src/client/index.js | 4479 | beginBlockRename | Start typing a goal's name into its heading. |
-| src/client/index.js | 4485 | commitBlockRename | Keep the name the heading says, and close the field. |
-| src/client/index.js | 4497 | cancelBlockRename | Throw the typed name away, leaving the goal as it was called. |
-| src/client/index.js | 4514 | goalBaseName | The last piece of a workspace path: what the workspace is called. |
-| src/client/index.js | 4527 | beginGoalIntent | Start writing what a goal is for. |
-| src/client/index.js | 4542 | commitGoalIntent | Keep what the open line says, and close it. |
-| src/client/index.js | 4554 | cancelGoalIntent | Throw the typed line away, leaving the goal as it was. |
-| src/client/index.js | 4573 | removeBoardGoal | Take one goal off the canvas, with a few seconds to bring it back. |
-| src/client/index.js | 4620 | boardNameCollisions | Which drawn cards share a name, and where each one stands in its group. |
-| src/client/index.js | 4651 | noteCardTitle | Put the reader's word on a card before the shell has answered. |
-| src/client/index.js | 4666 | settleTitles | Let go of the stand-in names the feed has caught up with, or outlived. |
-| src/client/index.js | 4685 | beginBoardRename | Start renaming one conversation from its card. |
-| src/client/index.js | 4703 | commitBoardRename | Keep what the open name field says, and rename the conversation. |
-| src/client/index.js | 4742 | cancelBoardRename | Throw the open name field away, leaving the conversation as it was. |
-| src/client/index.js | 4761 | forkBoardCard | Start a branch from one conversation, and draw the line when it lands. |
-| src/client/index.js | 4807 | returnForkMark | Let a conversation's branch mark answer again, and say so on the card. |
-| src/client/index.js | 4823 | waitForBranchRow | The catalogue row for one conversation, asked for until it arrives. |
-| src/client/index.js | 4855 | settleBranchName | Give a fresh branch a name nobody else is using, and answer with it. |
-| src/client/index.js | 4898 | pasteIntoComposer | Put words in the message box of the conversation on screen. |
-| src/client/index.js | 4932 | composerHasText | Whether the message box already holds something. |
-| src/client/index.js | 4948 | boxHasText | Whether one box already holds words. |
-| src/client/index.js | 4963 | seatCaretAtEnd | Put the caret at the end of the box's content. |
-| src/client/index.js | 5002 | dropCardIntoComposer | Hand one loose card's words to a conversation's message box. |
-| src/client/index.js | 5022 | pasteIntoBoxNow | Put the words in the box that is on screen right now, if there is one. |
-| src/client/index.js | 5044 | putThroughEditor | Put text into the editor through the editing command. |
-| src/client/index.js | 5063 | pasteThroughEvent | Put text into the editor as a real paste event. |
-| src/client/index.js | 5089 | ideaFocusCard | One card from the board's own document, by id. |
-| src/client/index.js | 5109 | ideaFocusOrigin | Where a press happened, as a point the sheet can grow out of. |
-| src/client/index.js | 5134 | animateIdeaFocusIn | Let the sheet grow out of the place the reader pointed at. |
-| src/client/index.js | 5177 | ideaFocusSessionTitle | The name of the conversation a thought is tied to, for the sheet's foot. |
-| src/client/index.js | 5198 | paintIdeaFocusDone | Keep the sheet's done box in step with the card it belongs to. |
-| src/client/index.js | 5219 | cleanIdeaTitle | Keep the title on one line while letting it wrap on the paper. |
-| src/client/index.js | 5227 | growIdeaTitle | Let the title field take as many lines as the words it is showing. |
-| src/client/index.js | 5246 | writeIdeaFocus | Write what the sheet says into the card it belongs to. |
-| src/client/index.js | 5270 | openIdeaFocus | Open one idea card, or a blank new one, in the centre of the board. |
-| src/client/index.js | 5514 | closeIdeaFocus | Close the sheet, keeping what it says. |
-| src/client/index.js | 5565 | deliverIdeaFocus | Hand the sheet's thought to the conversation it is tied to. |
-| src/client/index.js | 5589 | buildIdeaMenu | The menu behind a thought card's ⋯. |
-| src/client/index.js | 5632 | ideaMenuItem | One line of that menu. |
-| src/client/index.js | 5661 | buildSessionMenu | The verbs on a conversation card that are not worth a seat of their own. |
-| src/client/index.js | 5702 | placeCardMenu | One line of that menu. |
-| src/client/index.js | 5719 | cardMenuItem | } |
-| src/client/index.js | 5758 | buildBoardLooseCard | One loose card: a thought the reader put on the canvas rather than in a |
-| src/client/index.js | 6108 | beginBoardCard | Start typing into one loose card - at its title, or at its body. |
-| src/client/index.js | 6148 | boardTakeCardText | Keep what the open field says, and close it. |
-| src/client/index.js | 6165 | commitBoardCard | } |
-| src/client/index.js | 6178 | cancelBoardCard | Throw the open field away, leaving the card as it was last written. |
-| src/client/index.js | 6199 | settleBoardCardForPress | Settle the open card field for a press, without the paint a settle |
-| src/client/index.js | 6222 | addBoardCardAt | Open a new thought at a place, and let the sheet write it. |
-| src/client/index.js | 6239 | addBoardCard | Open a new thought where the reader is looking, or below everything when |
-| src/client/index.js | 6256 | removeLooseCard | Take one loose card off the canvas. |
-| src/client/index.js | 6301 | removeBoardCard | Take one conversation off the board. |
-| src/client/index.js | 6343 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
-| src/client/index.js | 6372 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
-| src/client/index.js | 6411 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
-| src/client/index.js | 6439 | closeIdeaMenu | Mark the column the hand is over, or clear every mark. |
-| src/client/index.js | 6456 | closeSeatMenu | Put the colour wheel away, without a repaint. |
-| src/client/index.js | 6476 | closeGoalMenu | Put a goal's ⋯ menu away, without a repaint. |
-| src/client/index.js | 6496 | closeVerdictMenu | Put a card's state menu away, without a repaint. |
-| src/client/index.js | 6515 | closeSessionMenu | Put a conversation card's menu away, without a repaint. |
-| src/client/index.js | 6531 | paintStackDrop | } |
-| src/client/index.js | 6549 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
-| src/client/index.js | 6568 | parkCardOutside | Give a card lifted out of a column a place on the paper. |
-| src/client/index.js | 6595 | boardPointerDown | The one press handler on the canvas. |
-| src/client/index.js | 6747 | boardNoteDone | Put the drop bands on screen, or take them away. |
-| src/client/index.js | 6755 | showDropZones | } |
-| src/client/index.js | 6770 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
-| src/client/index.js | 6787 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
-| src/client/index.js | 6805 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
-| src/client/index.js | 6823 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
-| src/client/index.js | 6882 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
-| src/client/index.js | 6920 | sessionSlotAt | The place the hand is asking for, read off the grid. |
-| src/client/index.js | 6966 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
-| src/client/index.js | 6979 | resetSessionReorder | Put every column back where the paint left it. |
-| src/client/index.js | 7005 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
-| src/client/index.js | 7043 | beginSessionCarrier | Give a carried card its body, where the hand is. |
-| src/client/index.js | 7085 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
-| src/client/index.js | 7206 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
-| src/client/index.js | 7484 | handCardToSession | Hand one loose card's words to a conversation, and leave a trace behind. |
-| src/client/index.js | 7510 | nameSessionForCard | Let the conversation a card was handed to wear the card's own name. |
-| src/client/index.js | 7540 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
-| src/client/index.js | 7596 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
-| src/client/index.js | 7606 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
-| src/client/index.js | 7652 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
-| src/client/index.js | 7667 | onBoardDoubleClick | A double click on the paper: write a card right there. |
-| src/client/index.js | 7737 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
-| src/client/index.js | 7769 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
-| src/client/index.js | 7864 | makeTranslator | Translate through the locale seat when it is wired, else through the |
-| src/client/index.js | 7880 | KeyRow | One rebindable key: focus the box, press the key you want. |
-| src/client/index.js | 7920 | SliderRow | One numeric preference. |
-| src/client/index.js | 7950 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
-| src/client/index.js | 7996 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
-| src/client/index.js | 8189 | VimSection | The whole Settings → Vim scrolling page. |
-| src/client/index.js | 8429 | BoardPage | The board as the main panel's page. |
-| src/client/index.js | 8464 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
-| src/client/index.js | 8509 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
-| src/client/index.js | 8573 | overviewToday | What today did, as the overview reads it. |
-| src/client/index.js | 8666 | overviewFigure | One figure: the number, and what it counts, read as one block. |
-| src/client/index.js | 8684 | overviewNumber | One number in the table: how it reads depends on what it counts. |
-| src/client/index.js | 8693 | overviewHeading | One heading of the table, in the same columns as its rows. |
-| src/client/index.js | 8711 | mountOverviewInto | Build the overview into an element the host owns. |
-| src/client/index.js | 8843 | OverviewPage | The overview as the main panel's page. |
-| src/client/index.js | 8879 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
-| src/client/index.js | 8925 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
-| src/client/index.js | 8982 | installWindowCSS | The rules every window this plugin mounts shares, once. |
-| src/client/index.js | 9019 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
-| src/client/index.js | 9095 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 9441 | apply | Client activation. |
+| src/client/index.js | 101 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
+| src/client/index.js | 114 | onKeyDown | } |
+| src/client/index.js | 524 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
+| src/client/index.js | 550 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
+| src/client/index.js | 575 | onPointerMove | Remember where the pointer is. |
+| src/client/index.js | 596 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
+| src/client/index.js | 601 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
+| src/client/index.js | 620 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
+| src/client/index.js | 639 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
+| src/client/index.js | 664 | dismissOutsidePress | Put an open window away when the press landed beside it. |
+| src/client/index.js | 690 | pressMissesWindow | Whether a press landed outside an open window's card. |
+| src/client/index.js | 706 | activateSession | Switch the main view to one conversation. |
+| src/client/index.js | 737 | toggleBoard | The board the plugin opens when a page is not available. |
+| src/client/index.js | 750 | showBoard | } |
+| src/client/index.js | 774 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
+| src/client/index.js | 798 | pointInSelection | Whether one right press landed inside the words the reader selected. |
+| src/client/index.js | 839 | onContextMenu | The way back from a conversation: a right press on its page. |
+| src/client/index.js | 884 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
+| src/client/index.js | 916 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
+| src/client/index.js | 1011 | makeTranslator | Translate through the locale seat when it is wired, else through the |
+| src/client/index.js | 1027 | KeyRow | One rebindable key: focus the box, press the key you want. |
+| src/client/index.js | 1067 | SliderRow | One numeric preference. |
+| src/client/index.js | 1097 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
+| src/client/index.js | 1143 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
+| src/client/index.js | 1336 | VimSection | The whole Settings → Vim scrolling page. |
+| src/client/index.js | 1576 | BoardPage | The board as the main panel's page. |
+| src/client/index.js | 1611 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
+| src/client/index.js | 1656 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
+| src/client/index.js | 1720 | overviewToday | What today did, as the overview reads it. |
+| src/client/index.js | 1813 | overviewFigure | One figure: the number, and what it counts, read as one block. |
+| src/client/index.js | 1831 | overviewNumber | One number in the table: how it reads depends on what it counts. |
+| src/client/index.js | 1840 | overviewHeading | One heading of the table, in the same columns as its rows. |
+| src/client/index.js | 1858 | mountOverviewInto | Build the overview into an element the host owns. |
+| src/client/index.js | 1990 | OverviewPage | The overview as the main panel's page. |
+| src/client/index.js | 2026 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
+| src/client/index.js | 2072 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
+| src/client/index.js | 2129 | installWindowCSS | The rules every window this plugin mounts shares, once. |
+| src/client/index.js | 2166 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
+| src/client/index.js | 2242 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
+| src/client/index.js | 2588 | apply | Client activation. |
 | src/client/model-picker.js | 118 | openNewSessionModelPick | Open the model window for the sheet's model row. |
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |

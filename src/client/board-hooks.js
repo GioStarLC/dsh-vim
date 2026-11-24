@@ -13,6 +13,10 @@ const hooks = {
     return null
   },
   drawLinks: function () {},
+  showBoard: function () {
+    return false
+  },
+  showOverview: function () {},
   openSession: function () {},
   pasteDraft: function () {
     return Promise.resolve(false)
@@ -50,6 +54,16 @@ export function boardNoteFinished(summary) {
   return hooks.noteFinished(summary)
 }
 
+/** Open the board as the sidebar page, or the floating window. */
+export function boardShowBoard() {
+  return hooks.showBoard()
+}
+
+/** Open the overview page. */
+export function boardShowOverview() {
+  hooks.showOverview()
+}
+
 /** Redraw the tie lines between the canvas and its margins. */
 export function boardDrawLinks() {
   hooks.drawLinks()
@@ -58,10 +72,11 @@ export function boardDrawLinks() {
 /**
  * Switch the main view to one conversation.
  * @param {string} id - session id.
+ * @param {object} [opts] - `{ anchor: true }` for a board arrival.
  * @returns {void}
  */
-export function boardOpenSession(id) {
-  hooks.openSession(id)
+export function boardOpenSession(id, opts) {
+  hooks.openSession(id, opts)
 }
 
 /**
