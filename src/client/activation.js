@@ -8,7 +8,7 @@ import { forgetPointer, onContextMenu, onEscapeBlur, onFocusLoss, onKeyDown, onK
 import { activateSession, showBoard, showOverview } from './app-actions.js'
 import { installSettings } from './settings-page.js'
 import { installBoardPage, installOverviewPage, installWindowCSS, mountOverviewInto, overviewToday } from './board-pages.js'
-import { renderBoard, closeIdeaFocus, pasteIntoComposer } from './board-view.js'
+import { renderBoard, closeIdeaFocus, pasteIntoComposer, boardCloseMenus, boardSettleEdits } from './board-view.js'
 import { closeBoard, mountBoardInto, openBoard, unmountBoard } from './board-mount.js'
 import { commitBoardNote, noteCardFinished, pinToBoard, watchForks } from './board-notes.js'
 import { boardPointerDown, drawCardLinks } from './board-gestures.js'
@@ -429,6 +429,8 @@ function apply(ctx) {
     pasteDraft: pasteIntoComposer,
     showBoard: showBoard,
     showOverview: showOverview,
+    settleEdits: boardSettleEdits,
+    closeMenus: boardCloseMenus,
   })
   // The picker opened for the new-conversation sheet has no conversation to
   // submit to; the choice goes back to the sheet it was opened from.

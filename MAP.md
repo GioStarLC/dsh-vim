@@ -2,7 +2,7 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，35 个文件，619 个顶层函数。
+源码：`src/client/`，35 个文件，621 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
@@ -382,6 +382,8 @@
 | src/client/board-view.js | 5017 | boardNoteDone | Put the drop bands on screen, or take them away. |
 | src/client/board-view.js | 5038 | handCardToSession | Hand one loose card's words to a conversation, and leave a trace behind. |
 | src/client/board-view.js | 5071 | nameSessionForCard | Let the conversation a card was handed to wear the card's own name. |
+| src/client/board-view.js | 5097 | boardSettleEdits | Commit whatever is being typed on the canvas before a day page is shown. |
+| src/client/board-view.js | 5104 | boardCloseMenus | Put away every open card, seat, goal, verdict and idea menu. |
 | src/client/dom.js | 14 | isEditable | True when the element consumes printable characters itself. |
 | src/client/dom.js | 28 | isScrollable | True when the element is a non-editable box that overflows vertically and |
 | src/client/dom.js | 41 | parentOf | Parent element, crossing shadow boundaries through the host node. |

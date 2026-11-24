@@ -5086,4 +5086,27 @@ function nameSessionForCard(sessionId, text) {
   })
 }
 
-export { commitComposerTitle, nameSessionForCard, handCardToSession, sendToDone, bringBackFromDone, pasteIntoComposer, renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock, addBoardCard, addBoardCardAt, commitGoalIntent, closeIdeaFocus, buildBoardCard, settleBoardCardForPress, closeIdeaMenu, closeSeatMenu, closeGoalMenu, closeVerdictMenu, closeSessionMenu, boardNoteDone, openIdeaFocus, flushHandoff }
+/**
+ * Commit whatever is being typed on the canvas before a day page is shown.
+ *
+ * The day view is read-only: a half-typed card or block would have nowhere to
+ * land in it, so the edits settle first, exactly as they would on leaving the
+ * board.
+ * @returns {void}
+ */
+function boardSettleEdits() {
+  if (BOARD.cardEditing) settleBoardCardForPress()
+  if (BOARD.renamingCard) commitBoardRename()
+  if (BOARD.renamingBlock) commitBlockRename()
+}
+
+/** Put away every open card, seat, goal, verdict and idea menu. */
+function boardCloseMenus() {
+  closeIdeaMenu()
+  closeSessionMenu()
+  closeSeatMenu()
+  closeGoalMenu()
+  closeVerdictMenu()
+}
+
+export { boardSettleEdits, boardCloseMenus, commitComposerTitle, nameSessionForCard, handCardToSession, sendToDone, bringBackFromDone, pasteIntoComposer, renderBoard, renderBoardOnStatus, startDayTimer, stopDayTimer, stopBoardClock, addBoardCard, addBoardCardAt, commitGoalIntent, closeIdeaFocus, buildBoardCard, settleBoardCardForPress, closeIdeaMenu, closeSeatMenu, closeGoalMenu, closeVerdictMenu, closeSessionMenu, boardNoteDone, openIdeaFocus, flushHandoff }
