@@ -2,7 +2,7 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，31 个文件，557 个顶层函数。
+源码：`src/client/`，32 个文件，566 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
@@ -369,34 +369,25 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 105 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
-| src/client/index.js | 118 | onKeyDown | } |
-| src/client/index.js | 528 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
-| src/client/index.js | 554 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
-| src/client/index.js | 579 | onPointerMove | Remember where the pointer is. |
-| src/client/index.js | 600 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
-| src/client/index.js | 605 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
-| src/client/index.js | 624 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
-| src/client/index.js | 643 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
-| src/client/index.js | 668 | dismissOutsidePress | Put an open window away when the press landed beside it. |
-| src/client/index.js | 694 | pressMissesWindow | Whether a press landed outside an open window's card. |
-| src/client/index.js | 710 | activateSession | Switch the main view to one conversation. |
-| src/client/index.js | 738 | toggleBoard | The board the plugin opens when a page is not available. |
-| src/client/index.js | 751 | showBoard | } |
-| src/client/index.js | 775 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
-| src/client/index.js | 799 | pointInSelection | Whether one right press landed inside the words the reader selected. |
-| src/client/index.js | 840 | onContextMenu | The way back from a conversation: a right press on its page. |
-| src/client/index.js | 885 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
-| src/client/index.js | 917 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
-| src/client/index.js | 1012 | makeTranslator | Translate through the locale seat when it is wired, else through the |
-| src/client/index.js | 1028 | KeyRow | One rebindable key: focus the box, press the key you want. |
-| src/client/index.js | 1068 | SliderRow | One numeric preference. |
-| src/client/index.js | 1098 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
-| src/client/index.js | 1144 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
-| src/client/index.js | 1337 | VimSection | The whole Settings → Vim scrolling page. |
-| src/client/index.js | 1573 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
-| src/client/index.js | 1649 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 1995 | apply | Client activation. |
+| src/client/index.js | 106 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
+| src/client/index.js | 119 | onKeyDown | } |
+| src/client/index.js | 529 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
+| src/client/index.js | 555 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
+| src/client/index.js | 580 | onPointerMove | Remember where the pointer is. |
+| src/client/index.js | 601 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
+| src/client/index.js | 606 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
+| src/client/index.js | 625 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
+| src/client/index.js | 644 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
+| src/client/index.js | 669 | dismissOutsidePress | Put an open window away when the press landed beside it. |
+| src/client/index.js | 695 | pressMissesWindow | Whether a press landed outside an open window's card. |
+| src/client/index.js | 711 | activateSession | Switch the main view to one conversation. |
+| src/client/index.js | 739 | toggleBoard | The board the plugin opens when a page is not available. |
+| src/client/index.js | 752 | showBoard | } |
+| src/client/index.js | 776 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
+| src/client/index.js | 800 | pointInSelection | Whether one right press landed inside the words the reader selected. |
+| src/client/index.js | 841 | onContextMenu | The way back from a conversation: a right press on its page. |
+| src/client/index.js | 854 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
+| src/client/index.js | 1200 | apply | Client activation. |
 | src/client/model-picker.js | 118 | openNewSessionModelPick | Open the model window for the sheet's model row. |
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |
@@ -492,6 +483,24 @@
 | src/client/sessions.js | 288 | folderIndex | Which folder each conversation lives in, as `{ label, path }` keyed by |
 | src/client/sessions.js | 325 | folderById | One workspace, by the id the board files its goals under. |
 | src/client/sessions.js | 352 | folderLabel | What a folder reads as on a row: the Workspace's own title, else the last |
+| src/client/settings-page.js | 46 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
+| src/client/settings-page.js | 78 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
+| src/client/settings-page.js | 171 | makeTranslator | Translate through the locale seat when it is wired, else through the |
+| src/client/settings-page.js | 187 | KeyRow | One rebindable key: focus the box, press the key you want. |
+| src/client/settings-page.js | 227 | SliderRow | One numeric preference. |
+| src/client/settings-page.js | 257 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
+| src/client/settings-page.js | 303 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
+| src/client/settings-page.js | 310 | reload | Read the catalog again: it is refilled as adapters and credentials change. |
+| src/client/settings-page.js | 340 | reorder | Put one pair at a place in the list, or take it out of it. |
+| src/client/settings-page.js | 348 | toggle | Append one pair, or drop whichever entry carries that key. |
+| src/client/settings-page.js | 361 | action | One small square button: move an entry, or take it out. |
+| src/client/settings-page.js | 496 | VimSection | The whole Settings → Vim scrolling page. |
+| src/client/settings-page.js | 512 | set | Apply a patch and surface a rejection in the page. |
+| src/client/settings-page.js | 518 | keyRow | One rebindable-key row, bound to its seat. |
+| src/client/settings-page.js | 533 | sliderRow | One numeric row, bound to its seat. |
+| src/client/settings-page.js | 558 | boolRow | One on/off row, bound to its seat. |
+| src/client/settings-page.js | 584 | choiceRow | One row of mutually exclusive options, bound to its seat. Same shape as |
+| src/client/settings-page.js | 732 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
 | src/client/strings.js | 775 | localeIsZh | Best-effort locale guess, used for the nav label and fallback strings. |
 | src/client/strings.js | 781 | paletteText | Built-in string for the task window; it is plugin chrome, not shell copy. |
 | src/client/task-window.js | 79 | requestTurns | Queue a turn count for every drawn row that does not have one yet. The |
