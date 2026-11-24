@@ -2,7 +2,7 @@
 
 由 `npm run map` 生成，不要手改。找一个功能的入口：先在这里按名字查到文件与行号，再读那一段。
 
-源码：`src/client/`，29 个文件，557 个顶层函数。
+源码：`src/client/`，30 个文件，557 个顶层函数。
 
 | 文件 | 行 | 函数 | 上方注释 |
 |---|---:|---|---|
@@ -75,6 +75,45 @@
 | src/client/board-css.js | 2330 | applyBoardPageInk | Paint the page with the host's theme. |
 | src/client/board-css.js | 2467 | boardIcon | One of those glyphs, at a size, as an element. |
 | src/client/board-css.js | 2516 | installBoardCSS | Put the board's hover and motion rules on the page, once. |
+| src/client/board-gestures.js | 31 | raiseBoardCard | Bring one card to the front of the paper. |
+| src/client/board-gestures.js | 51 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
+| src/client/board-gestures.js | 101 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
+| src/client/board-gestures.js | 120 | markDoneDrop | Light the finished strip a carried conversation would land in. |
+| src/client/board-gestures.js | 140 | markNoDrop | Say, under the hand, that the paper will not take this card. |
+| src/client/board-gestures.js | 166 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
+| src/client/board-gestures.js | 183 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
+| src/client/board-gestures.js | 221 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
+| src/client/board-gestures.js | 248 | boardDragText | } |
+| src/client/board-gestures.js | 266 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
+| src/client/board-gestures.js | 283 | onNativeDragEnd | A native drag is over, however it ended. |
+| src/client/board-gestures.js | 297 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
+| src/client/board-gestures.js | 313 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
+| src/client/board-gestures.js | 333 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
+| src/client/board-gestures.js | 360 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
+| src/client/board-gestures.js | 396 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
+| src/client/board-gestures.js | 425 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
+| src/client/board-gestures.js | 464 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
+| src/client/board-gestures.js | 478 | paintStackDrop | } |
+| src/client/board-gestures.js | 496 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
+| src/client/board-gestures.js | 517 | boardPointerDown | The one press handler on the canvas. |
+| src/client/board-gestures.js | 659 | showDropZones | } |
+| src/client/board-gestures.js | 674 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
+| src/client/board-gestures.js | 691 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
+| src/client/board-gestures.js | 709 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
+| src/client/board-gestures.js | 727 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
+| src/client/board-gestures.js | 786 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
+| src/client/board-gestures.js | 824 | sessionSlotAt | The place the hand is asking for, read off the grid. |
+| src/client/board-gestures.js | 870 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
+| src/client/board-gestures.js | 883 | resetSessionReorder | Put every column back where the paint left it. |
+| src/client/board-gestures.js | 909 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
+| src/client/board-gestures.js | 947 | beginSessionCarrier | Give a carried card its body, where the hand is. |
+| src/client/board-gestures.js | 987 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
+| src/client/board-gestures.js | 1108 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
+| src/client/board-gestures.js | 1388 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
+| src/client/board-gestures.js | 1444 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
+| src/client/board-gestures.js | 1454 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
+| src/client/board-gestures.js | 1500 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
+| src/client/board-gestures.js | 1515 | onBoardDoubleClick | A double click on the paper: write a card right there. |
 | src/client/board-history.js | 40 | readMoment | The page the board last drew, as it was left, or null. |
 | src/client/board-history.js | 54 | forgetMoment | Forget the page that was left, once it has been filed. |
 | src/client/board-history.js | 78 | noteMoment | Remember the page this repaint draws. |
@@ -113,6 +152,10 @@
 | src/client/board-history.js | 1045 | exportHistory | Write the board, its notes and every page into one file. |
 | src/client/board-history.js | 1076 | pickHistoryFile | Ask for one file, and take it in when it arrives. |
 | src/client/board-history.js | 1111 | importHistory | Take in one exported file. |
+| src/client/board-mount.js | 45 | openBoard | Mount the board. |
+| src/client/board-mount.js | 94 | mountBoardInto | Build the board's parts into a root element, whichever mount owns it. |
+| src/client/board-mount.js | 405 | unmountBoard | Unmount the board, whichever mount holds it. |
+| src/client/board-mount.js | 511 | closeBoard | Take the floating board down, element and all. |
 | src/client/board-notes.js | 23 | beginBoardNote | Start typing the line on one card. |
 | src/client/board-notes.js | 36 | commitBoardNote | Keep what the open field says, and close it. |
 | src/client/board-notes.js | 51 | cancelBoardNote | Throw the open field away, leaving the card as it was. |
@@ -169,49 +212,6 @@
 | src/client/board-stores.js | 2282 | keyFor | A key that sorts by the moment it was written, and never collides. |
 | src/client/board-stores.js | 2361 | makeCarryStore | } |
 | src/client/board-stores.js | 2366 | read | What is stored, reduced to `id -> {from, title, goal}`. |
-| src/client/board-ui.js | 49 | openBoard | Mount the board. |
-| src/client/board-ui.js | 98 | mountBoardInto | Build the board's parts into a root element, whichever mount owns it. |
-| src/client/board-ui.js | 409 | unmountBoard | Unmount the board, whichever mount holds it. |
-| src/client/board-ui.js | 515 | closeBoard | Take the floating board down, element and all. |
-| src/client/board-ui.js | 537 | raiseBoardCard | Bring one card to the front of the paper. |
-| src/client/board-ui.js | 557 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
-| src/client/board-ui.js | 607 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
-| src/client/board-ui.js | 626 | markDoneDrop | Light the finished strip a carried conversation would land in. |
-| src/client/board-ui.js | 646 | markNoDrop | Say, under the hand, that the paper will not take this card. |
-| src/client/board-ui.js | 672 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
-| src/client/board-ui.js | 689 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
-| src/client/board-ui.js | 727 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
-| src/client/board-ui.js | 754 | boardDragText | } |
-| src/client/board-ui.js | 772 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
-| src/client/board-ui.js | 789 | onNativeDragEnd | A native drag is over, however it ended. |
-| src/client/board-ui.js | 803 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
-| src/client/board-ui.js | 819 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
-| src/client/board-ui.js | 839 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
-| src/client/board-ui.js | 866 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
-| src/client/board-ui.js | 902 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
-| src/client/board-ui.js | 931 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
-| src/client/board-ui.js | 970 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
-| src/client/board-ui.js | 984 | paintStackDrop | } |
-| src/client/board-ui.js | 1002 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
-| src/client/board-ui.js | 1024 | boardPointerDown | The one press handler on the canvas. |
-| src/client/board-ui.js | 1166 | showDropZones | } |
-| src/client/board-ui.js | 1181 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
-| src/client/board-ui.js | 1198 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
-| src/client/board-ui.js | 1216 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
-| src/client/board-ui.js | 1234 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
-| src/client/board-ui.js | 1293 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
-| src/client/board-ui.js | 1331 | sessionSlotAt | The place the hand is asking for, read off the grid. |
-| src/client/board-ui.js | 1377 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
-| src/client/board-ui.js | 1390 | resetSessionReorder | Put every column back where the paint left it. |
-| src/client/board-ui.js | 1416 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
-| src/client/board-ui.js | 1454 | beginSessionCarrier | Give a carried card its body, where the hand is. |
-| src/client/board-ui.js | 1494 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
-| src/client/board-ui.js | 1615 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
-| src/client/board-ui.js | 1897 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
-| src/client/board-ui.js | 1953 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
-| src/client/board-ui.js | 1963 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
-| src/client/board-ui.js | 2009 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
-| src/client/board-ui.js | 2024 | onBoardDoubleClick | A double click on the paper: write a card right there. |
 | src/client/board-view.js | 28 | renderBoard | import { dayOf, daysBetween, startOfToday } from './time.js' |
 | src/client/board-view.js | 251 | boardStatusFingerprint | The board's reading of every card's status, as one string. |
 | src/client/board-view.js | 272 | renderBoardOnStatus | Repaint the board for a status tick, but only if something on screen |
@@ -357,46 +357,46 @@
 | src/client/focus.js | 449 | onFocusIn | Keep the message box from taking the keyboard on its own. |
 | src/client/focus.js | 475 | noteFocusReturn | Widen the licence to a focus arriving right after the window got the |
 | src/client/focus.js | 487 | justReturned | Whether a focus arriving now is the tail of the window coming back. |
-| src/client/index.js | 102 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
-| src/client/index.js | 115 | onKeyDown | } |
-| src/client/index.js | 525 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
-| src/client/index.js | 551 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
-| src/client/index.js | 576 | onPointerMove | Remember where the pointer is. |
-| src/client/index.js | 597 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
-| src/client/index.js | 602 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
-| src/client/index.js | 621 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
-| src/client/index.js | 640 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
-| src/client/index.js | 665 | dismissOutsidePress | Put an open window away when the press landed beside it. |
-| src/client/index.js | 691 | pressMissesWindow | Whether a press landed outside an open window's card. |
-| src/client/index.js | 707 | activateSession | Switch the main view to one conversation. |
-| src/client/index.js | 738 | toggleBoard | The board the plugin opens when a page is not available. |
-| src/client/index.js | 751 | showBoard | } |
-| src/client/index.js | 775 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
-| src/client/index.js | 799 | pointInSelection | Whether one right press landed inside the words the reader selected. |
-| src/client/index.js | 840 | onContextMenu | The way back from a conversation: a right press on its page. |
-| src/client/index.js | 885 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
-| src/client/index.js | 917 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
-| src/client/index.js | 1012 | makeTranslator | Translate through the locale seat when it is wired, else through the |
-| src/client/index.js | 1028 | KeyRow | One rebindable key: focus the box, press the key you want. |
-| src/client/index.js | 1068 | SliderRow | One numeric preference. |
-| src/client/index.js | 1098 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
-| src/client/index.js | 1144 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
-| src/client/index.js | 1337 | VimSection | The whole Settings → Vim scrolling page. |
-| src/client/index.js | 1577 | BoardPage | The board as the main panel's page. |
-| src/client/index.js | 1612 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
-| src/client/index.js | 1657 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
-| src/client/index.js | 1721 | overviewToday | What today did, as the overview reads it. |
-| src/client/index.js | 1814 | overviewFigure | One figure: the number, and what it counts, read as one block. |
-| src/client/index.js | 1832 | overviewNumber | One number in the table: how it reads depends on what it counts. |
-| src/client/index.js | 1841 | overviewHeading | One heading of the table, in the same columns as its rows. |
-| src/client/index.js | 1859 | mountOverviewInto | Build the overview into an element the host owns. |
-| src/client/index.js | 1991 | OverviewPage | The overview as the main panel's page. |
-| src/client/index.js | 2027 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
-| src/client/index.js | 2073 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
-| src/client/index.js | 2130 | installWindowCSS | The rules every window this plugin mounts shares, once. |
-| src/client/index.js | 2167 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
-| src/client/index.js | 2243 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
-| src/client/index.js | 2589 | apply | Client activation. |
+| src/client/index.js | 104 | onSendKey | True when this keystroke is a send, and the keyboard should not stay in |
+| src/client/index.js | 117 | onKeyDown | } |
+| src/client/index.js | 527 | onKeyUp | Any keyup ends the hold, so a dropped keyup cannot leave the view scrolling. |
+| src/client/index.js | 553 | onEscapeBlur | Escape leaves a focused composer, so the scroll keys come back. |
+| src/client/index.js | 578 | onPointerMove | Remember where the pointer is. |
+| src/client/index.js | 599 | forgetPointer | Forget the remembered pointer, so the focus and centre rules decide again. |
+| src/client/index.js | 604 | onUserScroll | The user took over with the wheel or a touch: abandon our animation. |
+| src/client/index.js | 623 | onFocusLoss | Losing the window or the tab must not leave a hold or a stale pointer |
+| src/client/index.js | 642 | onPointerDown | A press says where the keyboard should be: inside a text field it asks |
+| src/client/index.js | 667 | dismissOutsidePress | Put an open window away when the press landed beside it. |
+| src/client/index.js | 693 | pressMissesWindow | Whether a press landed outside an open window's card. |
+| src/client/index.js | 709 | activateSession | Switch the main view to one conversation. |
+| src/client/index.js | 740 | toggleBoard | The board the plugin opens when a page is not available. |
+| src/client/index.js | 753 | showBoard | } |
+| src/client/index.js | 777 | showOverview | Open the overview page: the board's own button, and the sidebar's row. |
+| src/client/index.js | 801 | pointInSelection | Whether one right press landed inside the words the reader selected. |
+| src/client/index.js | 842 | onContextMenu | The way back from a conversation: a right press on its page. |
+| src/client/index.js | 887 | SendHintLine | The line that names the send key, contributed to the shell's own dock row |
+| src/client/index.js | 919 | sendKeyLabel | The modifier this machine's send accelerator lives on, named the way the |
+| src/client/index.js | 1014 | makeTranslator | Translate through the locale seat when it is wired, else through the |
+| src/client/index.js | 1030 | KeyRow | One rebindable key: focus the box, press the key you want. |
+| src/client/index.js | 1070 | SliderRow | One numeric preference. |
+| src/client/index.js | 1100 | ChoiceRow | A short set of mutually exclusive options, as a row of toggles. Used for |
+| src/client/index.js | 1146 | ModelListGroup | The switchable models as one settings group: what is chosen, in the order |
+| src/client/index.js | 1339 | VimSection | The whole Settings → Vim scrolling page. |
+| src/client/index.js | 1579 | BoardPage | The board as the main panel's page. |
+| src/client/index.js | 1614 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
+| src/client/index.js | 1659 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
+| src/client/index.js | 1723 | overviewToday | What today did, as the overview reads it. |
+| src/client/index.js | 1816 | overviewFigure | One figure: the number, and what it counts, read as one block. |
+| src/client/index.js | 1834 | overviewNumber | One number in the table: how it reads depends on what it counts. |
+| src/client/index.js | 1843 | overviewHeading | One heading of the table, in the same columns as its rows. |
+| src/client/index.js | 1861 | mountOverviewInto | Build the overview into an element the host owns. |
+| src/client/index.js | 1993 | OverviewPage | The overview as the main panel's page. |
+| src/client/index.js | 2029 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
+| src/client/index.js | 2075 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
+| src/client/index.js | 2132 | installWindowCSS | The rules every window this plugin mounts shares, once. |
+| src/client/index.js | 2169 | installSettings | Contribute the settings page and its vocabulary. Both contributions are |
+| src/client/index.js | 2245 | makeApi | Debug and tuning surface, also used by tools/selftest.mjs. |
+| src/client/index.js | 2591 | apply | Client activation. |
 | src/client/model-picker.js | 118 | openNewSessionModelPick | Open the model window for the sheet's model row. |
 | src/client/model-picker.js | 158 | openModelPick | One press of the model key: open the picker on the list of models the |
 | src/client/model-picker.js | 370 | modelPickHint | The line under the picker: what it is showing, and what the keys do. |

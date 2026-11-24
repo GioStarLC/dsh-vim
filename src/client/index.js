@@ -30,7 +30,9 @@
  */
 import React from 'react'
 import { closeVerdictMenu, closeIdeaMenu, renderBoard, closeIdeaFocus, closeGoalMenu, closeSeatMenu, closeSessionMenu, pasteIntoComposer } from './board-view.js'
-import { boardPointerDown, cancelBoardDrag, closeBoard, commitBoardNote, drawCardLinks, mountBoardInto, noteCardFinished, openBoard, openNote, pinToBoard, unmountBoard, watchForks } from './board-ui.js'
+import { closeBoard, mountBoardInto, openBoard, unmountBoard } from './board-mount.js'
+import { commitBoardNote, noteCardFinished, openNote, pinToBoard, watchForks } from './board-notes.js'
+import { boardPointerDown, cancelBoardDrag, drawCardLinks } from './board-gestures.js'
 import { closeNewSessionSheet, paintNewSessionModel, openNewSessionSheet, startNewSessionForGoal } from './board-sheet.js'
 import { workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, slotHue } from './board-canvas.js'
 import { setHistoryRepaint, closeBoardHistory, openBoardHistory, closeSeal, dropCarried, maybeShowSeal, noteMoment, pageDoc, pageView, restoreDay, settleDay } from './board-history.js'
