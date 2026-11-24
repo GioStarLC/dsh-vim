@@ -13,6 +13,7 @@ const hooks = {
     return null
   },
   drawLinks: function () {},
+  press: function () {},
   showBoard: function () {
     return false
   },
@@ -62,6 +63,15 @@ export function boardShowBoard() {
 /** Open the overview page. */
 export function boardShowOverview() {
   hooks.showOverview()
+}
+
+/**
+ * One press on the canvas, where a builder attaches its handler.
+ * @param {Event} ev - the pointerdown.
+ * @returns {void}
+ */
+export function boardPress(ev) {
+  hooks.press(ev)
 }
 
 /** Redraw the tie lines between the canvas and its margins. */

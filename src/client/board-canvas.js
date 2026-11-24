@@ -1829,5 +1829,30 @@ function boardJoinText(title, body) {
   return rest ? head + '\n' + rest : head
 }
 
+/**
+ * Give a card lifted out of a column a place on the paper.
+ *
+ * It stands beside the panel it left - clear of it, level with the first
+ * conversation - because the place it was drawn in was the column's, not
+ * its own.
+ * @param {string} sessionId - the conversation it came out of.
+ * @param {string} cardId - the card.
+ * @returns {void}
+ */
+function parkCardOutside(sessionId, cardId) {
+  var blocks = BOARD.blocks || []
+  for (var b = 0; b < blocks.length; b++) {
+    var rows = blocks[b].rows || []
+    for (var r = 0; r < rows.length; r++) {
+      if (rows[r].id !== sessionId) continue
+      var place = BOARD_STORE.blocks()[blocks[b].key]
+      if (!place) return
+      var wide = boardPanelWidths()[blocks[b].key] || boardBlockWidth(blocks[b])
+      BOARD_STORE.moveCard(cardId, place.x + wide + BOARD_TIDY_GAP, place.y + BOARD_BLOCK_HEAD_H)
+      return
+    }
+  }
+}
 
-export { workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, goalByKey, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardTextRows, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, nearestGoal, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, tidyLooseCards, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, boardNoteCols, slotHue }
+
+export { parkCardOutside, workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, goalByKey, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardTextRows, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, nearestGoal, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, tidyLooseCards, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, boardNoteCols, slotHue }

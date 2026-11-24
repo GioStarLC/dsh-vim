@@ -29,12 +29,13 @@
  * assembles it. The host must mount the `dsh-vim` row for it to reach the page.
  */
 import React from 'react'
-import { cancelBoardDrag, closeBoard, closeGoalMenu, closeIdeaFocus, closeIdeaMenu, closeSeatMenu, closeSessionMenu, closeVerdictMenu, commitBoardNote, drawCardLinks, mountBoardInto, noteCardFinished, openBoard, openNote, pasteIntoComposer, pinToBoard, renderBoard, unmountBoard, watchForks } from './board-ui.js'
+import { closeVerdictMenu, closeIdeaMenu, renderBoard, closeIdeaFocus, closeGoalMenu, closeSeatMenu, closeSessionMenu, pasteIntoComposer } from './board-view.js'
+import { boardPointerDown, cancelBoardDrag, closeBoard, commitBoardNote, drawCardLinks, mountBoardInto, noteCardFinished, openBoard, openNote, pinToBoard, unmountBoard, watchForks } from './board-ui.js'
 import { closeNewSessionSheet, paintNewSessionModel, openNewSessionSheet, startNewSessionForGoal } from './board-sheet.js'
 import { workspaceForGoal, boardBlockByKey, boardBlocks, boardPlaces, boardPanelHeights, boardPanelWidths, boardExtent, applyBoardZoom, setBoardZoom, fitBoardToWindow, onBoardResize, onBoardWheel, nextCardPlace, boardFreePlace, nextGoalName, goalOfRow, boardHomeOf, boardRowOf, blockInk, goalHue, noteInkOf, notePaper, noteParts, boardEditorRows, boardNoteMetrics, boardCardBox, boardCardOpenBox, canvasPointOf, goalNodeAt, goalUnder, doneBarUnder, goalHeadKeyUnder, boardJoinText, tidyBoard, boardSlots, blockSeat, boardBlockWidth, boardCardStacked, slotHue } from './board-canvas.js'
 import { setHistoryRepaint, closeBoardHistory, openBoardHistory, closeSeal, dropCarried, maybeShowSeal, noteMoment, pageDoc, pageView, restoreDay, settleDay } from './board-history.js'
 import { wireBoardHooks } from './board-hooks.js'
-import { BOARD, boardTitleOf } from './board-state.js'
+import { BOARD, boardFieldOpen, boardTitleOf } from './board-state.js'
 import { BOARD_HISTORY, BOARD_STORE, NOTE_STORE, HISTORY, CARRY, JOURNAL } from './board-stores.js'
 import { dayOf, daysBetween, startOfToday } from './time.js'
 import { BOARD_INK, NOTE_PAPER, BOARD_UI, BOARD_PAGE_UI, OVERVIEW_UI, boardIcon, installBoardCSS, applyBoardPageInk } from './board-css.js'
@@ -2616,6 +2617,7 @@ import {
         },
         noteFinished: noteCardFinished,
         drawLinks: drawCardLinks,
+        press: boardPointerDown,
         openSession: activateSession,
         pasteDraft: pasteIntoComposer,
         showBoard: showBoard,

@@ -627,8 +627,27 @@ var REPEAT_RAMP = 3
 /** A newline, spelled once so no editor or tool can double its escape. */
 var CHAR_NEWLINE = String.fromCharCode(10)
 
+/**
+ * How long a closed goal can be brought back.
+ *
+ * Long enough to notice the panel is gone and reach for it, short enough
+ * that the offer is not still standing over the next thing the reader does.
+ */
+var BOARD_UNDO_MS = 5000
+
+/**
+ * How long the board repeats a name the shell has not caught up with.
+ *
+ * A rename is a write to the host and a read of the list, and the two do not
+ * land in the same frame. Long enough to cover a slow feed, short enough that
+ * a name the shell never accepted falls back to the one it did.
+ */
+var BOARD_TITLE_SETTLE_MS = 4000
+
 
 export {
+  BOARD_UNDO_MS,
+  BOARD_TITLE_SETTLE_MS,
   CHAR_NEWLINE,
   NS,
   STORAGE_KEY,

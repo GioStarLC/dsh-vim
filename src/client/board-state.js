@@ -294,5 +294,48 @@ function boardTitleOf(summary) {
   return summary.displayTitle || summary.id
 }
 
+/**
+ * Repaint the whole canvas from the feeds.
+ *
+ * Cheap enough to do wholesale: a handful of panels, their cards, and the
+ * loose cards. A repaint that had to hold a half-finished gesture in place
+ * would have to be incremental instead, which is why one returns while a
+ * drag is in progress.
+ * @returns {void}
+ */
+/**
+ * Whether the reader is typing into one of the board's own fields.
+ *
+ * The fields are this plugin's elements, rebuilt with everything else, so a
+ * paint that lands while one is open takes the caret and the sentence with
+ * it - which reads as a field you cannot type in.
+ * @returns {boolean} true while a field is open.
+ */
+function boardFieldOpen() {
+  // Only a field that is still on the page can be destroyed by a paint. A field
+  // being opened has no element yet, which is what lets the paint that opens
+  // it through while every stray paint after it waits. "On the page" is asked
+  // of the stage rather than of `isConnected`: the stage is what a paint
+  // replaces, so it answers for the paint without depending on a mount having
+  // detached what it dropped.
+  var fields = [
+    BOARD.noteEditor,
+    BOARD.cardEditor,
+    BOARD.renameCardInput,
+    BOARD.renameBlockInput,
+    BOARD.intentInput,
+  ]
+  for (var i = 0; i < fields.length; i++) {
+    var field = fields[i]
+    if (!field) continue
+    if (BOARD.stage && typeof BOARD.stage.contains === 'function') {
+      if (BOARD.stage.contains(field)) return true
+      continue
+    }
+    if (field.isConnected) return true
+  }
+  return false
+}
 
-export { BOARD, boardTitleOf }
+
+export { BOARD, boardFieldOpen, boardTitleOf }
