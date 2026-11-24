@@ -5,7 +5,7 @@
  * attached through board-hooks; the gesture module owns what they do.
  */
 import { BOARD_CARD_W, BOARD_COLUMN_GAP, BOARD_DONE, BOARD_DONE_PREVIEW, BOARD_GOAL_MENU_W, BOARD_INBOX, BOARD_PRUNE_MS, BOARD_ROW_COLUMNS, BOARD_BLOCK_HEAD_H, BOARD_SLOTS, BOARD_SLOP, BOARD_TITLE_SETTLE_MS, BOARD_UNDO_MS, SNAPSHOT_VERSION, VERDICT_KEYS } from './constants.js'
-import { BOARD, boardFieldOpen, boardTitleOf } from './board-state.js'
+import { BOARD, boardFieldOpen, boardTitleOf, raiseBoardCard } from './board-state.js'
 import { BOARD_HISTORY, BOARD_STORE, CARRY, NOTE_STORE } from './board-stores.js'
 import { BOARD_INK, NOTE_PAPER, BOARD_UI, boardIcon } from './board-css.js'
 import { applyBoardZoom, blockInk, blockSeat, boardBlockWidth, boardBlocks, boardCardBox, boardCardOpenBox, boardCardStacked, boardEditorRows, boardExtent, boardJoinText, boardNoteMetrics, boardPanelHeights, boardPanelWidths, boardPlaces, boardRowOf, boardSlots, goalHue, nextCardPlace, noteInkOf, notePaper, noteParts, parkCardOutside, slotHue } from './board-canvas.js'

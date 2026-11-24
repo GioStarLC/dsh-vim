@@ -484,7 +484,7 @@ function startNewSessionForGoal(goalKey, title, text, cardId) {
     } else {
       showToast(paletteText('boardNewSessionCreated') + (name || noteParts(body).title))
     }
-    if (BOARD.open) renderBoard()
+    if (BOARD.open) boardRepaint()
   }).catch(fail)
   return true
 }

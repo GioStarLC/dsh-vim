@@ -762,6 +762,9 @@ const ReactStub = {
       },
     ]
   },
+  useRef(value) {
+    return { current: value === undefined ? null : value }
+  },
   useEffect(fn) {
     // Run it now and keep its disposer: the subscription a component builds must
     // exist before the check that depends on it fires.

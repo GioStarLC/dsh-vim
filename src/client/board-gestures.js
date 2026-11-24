@@ -5,11 +5,11 @@
  * The rendering it changes is board-view's, reached through board-hooks.
  */
 import { BOARD_CANVAS_EDGE, BOARD_CARD_W, BOARD_DONE, BOARD_FLOAT_W, BOARD_GOAL_NAME_MAX, BOARD_INBOX, BOARD_SLOP, BOARD_SORT_EDGE } from './constants.js'
-import { BOARD, boardFieldOpen, boardTitleOf } from './board-state.js'
+import { BOARD, boardFieldOpen, boardTitleOf, raiseBoardCard } from './board-state.js'
 import { BOARD_STORE } from './board-stores.js'
 import { BOARD_UI } from './board-css.js'
 import { boardHomeOf, canvasPointOf, doneBarUnder, goalHeadKeyUnder, goalNodeAt, goalUnder, nextGoalName, noteParts } from './board-canvas.js'
-import { boardRepaint } from './board-hooks.js'
+import { boardOpenSession, boardRepaint } from './board-hooks.js'
 import { startNewSessionForGoal } from './board-sheet.js'
 import { addBoardCardAt, boardNoteDone, bringBackFromDone, buildBoardCard, closeGoalMenu, closeIdeaMenu, closeSeatMenu, closeSessionMenu, closeVerdictMenu, handCardToSession, renderBoard, sendToDone, settleBoardCardForPress } from './board-view.js'
 import { refusal } from './errors.js'
@@ -17,25 +17,6 @@ import { conversationPool } from './sessions.js'
 import { paletteText } from './strings.js'
 import { showToast } from './toast.js'
 
-/**
- * Bring one card to the front of the paper.
- *
- * Cards overlap as soon as one is pulled out of its goal, and a pile is
- * only readable if the card being worked on is the one on top. The press
- * raises it, and the repaint remembers which card that was, so a repaint
- * does not put it back under the others.
- * @param {string} id - session id or card id.
- * @param {Element} node - its element, when there is one already.
- * @returns {void}
- */
-function raiseBoardCard(id, node) {
-  if (!id) return
-  BOARD.zTop = BOARD.zTop + 1
-  BOARD.front = id
-  if (!node) return
-  node.setAttribute('data-front', 'true')
-  node.style.zIndex = String(BOARD.zTop)
-}
 
 /**
  * Lift one put-away note out of the tray, under the hand.
@@ -1352,7 +1333,7 @@ if (byEnter) {
     BOARD_STORE.linkCard(key, landedOn)
     handCardToSession(key, landedOn, text)
   } else {
-    openSession(landedOn)
+    boardOpenSession(landedOn)
   }
   return
 }

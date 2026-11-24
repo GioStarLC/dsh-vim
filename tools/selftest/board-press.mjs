@@ -486,3 +486,14 @@ check('an empty day says so rather than drawing a column of zeroes', () => {
 })
 
 
+
+check('the heading history chip opens the day pages beside the canvas', () => {
+  seed([{ id: 'seen', displayTitle: 'seen', updatedAt: todayAt(1) }])
+  tap('j')
+  const chip = historyButton('boardHistory')
+  assert.ok(chip, 'the heading carries the history chip')
+  fireOn(chip, 'click', { type: 'click', stopPropagation() {} })
+  assert.equal(fakeWindow.__dshVim.historyPanel(), true, 'pressing it opens the history')
+  fakeWindow.__dshVim.historyPanel(false)
+  tap('Escape')
+})

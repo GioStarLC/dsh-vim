@@ -4,6 +4,21 @@
 import assert from 'node:assert/strict'
 import { step, bumpChecks, setMenuOnScreen, setMediaReduce, setNow, ROOT, BUNDLE, now, seq, timers, frames, FRAME_MS, clock, matches, matchesSimple, el, arrivedRows, transcript, sidebar, composer, button, body, root, editor, modal, modalEditor, blurCount, editorBlurs, synthKeys, replayKeydown, listeners, captureOf, record, unrecord, fire, shellFocus, domFocus, fireOn, clickThrough, flush, press, stored, fakeStorage, fakeDatabases, fakeRequest, fakeStoreApi, fakeIndexedDB, mediaReduce, fakeWindow, menu, menuOnScreen, fakeDocument, paneAt, cardNode, aimAt, resetHitTest, ReactStub, settingsElements, keyBindings, choiceButtons, PLACE_LABELS, fakeRequire, feed, registry, newSessions, renames, statusFeed, currentBinding, MODEL, REASONING, projections, forks, opened, archives, makeCtx, captured, loadBundle, client, ctx, cleanup, keydown, keyup, wheel, movePointer, blurWindow, refocusWindow, tap, SHIPPED, expectedLabel, checks, peak, reset, finish, check, checkAsync } from './harness.mjs'
 import { seed, ago, rowNodes, stateChip, rightTracks, statusTrack, footerText, renderedRowIds, toastText, seedVisible, CATALOG, FAVORITES, useFavorites, placeChoice, renderedStatuses, elapsedLabel, liveChip, renderedTurns, boardKey } from './helpers.mjs'
+check('the board and overview pages render with the React the bundle imported', () => {
+  // The host calls these components; a module that used `React` without
+  // importing it would only fail here, on the page the reader actually opens.
+  const mains = ctx.log.slots.main || []
+  const icons = ctx.log.slots['sidebar.panellist'] || []
+  assert.equal(mains.length >= 2, true, 'the board and the overview are both contributed')
+  for (const entry of mains) {
+    assert.ok(entry.component({}), 'every main panel renders')
+  }
+  for (const entry of icons) {
+    assert.ok(entry.component({ size: 16 }), 'every sidebar icon renders')
+  }
+})
+
+
 // --- lifecycle --------------------------------------------------------------
 
 check('the popup honours the configured size, spacing and position', () => {

@@ -81,45 +81,44 @@
 | src/client/board-css.js | 2330 | applyBoardPageInk | Paint the page with the host's theme. |
 | src/client/board-css.js | 2467 | boardIcon | One of those glyphs, at a size, as an element. |
 | src/client/board-css.js | 2516 | installBoardCSS | Put the board's hover and motion rules on the page, once. |
-| src/client/board-gestures.js | 31 | raiseBoardCard | Bring one card to the front of the paper. |
-| src/client/board-gestures.js | 51 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
-| src/client/board-gestures.js | 101 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
-| src/client/board-gestures.js | 120 | markDoneDrop | Light the finished strip a carried conversation would land in. |
-| src/client/board-gestures.js | 140 | markNoDrop | Say, under the hand, that the paper will not take this card. |
-| src/client/board-gestures.js | 166 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
-| src/client/board-gestures.js | 183 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
-| src/client/board-gestures.js | 221 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
-| src/client/board-gestures.js | 248 | boardDragText | } |
-| src/client/board-gestures.js | 266 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
-| src/client/board-gestures.js | 283 | onNativeDragEnd | A native drag is over, however it ended. |
-| src/client/board-gestures.js | 297 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
-| src/client/board-gestures.js | 313 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
-| src/client/board-gestures.js | 333 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
-| src/client/board-gestures.js | 360 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
-| src/client/board-gestures.js | 396 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
-| src/client/board-gestures.js | 425 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
-| src/client/board-gestures.js | 464 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
-| src/client/board-gestures.js | 478 | paintStackDrop | } |
-| src/client/board-gestures.js | 496 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
-| src/client/board-gestures.js | 517 | boardPointerDown | The one press handler on the canvas. |
-| src/client/board-gestures.js | 659 | showDropZones | } |
-| src/client/board-gestures.js | 674 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
-| src/client/board-gestures.js | 691 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
-| src/client/board-gestures.js | 709 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
-| src/client/board-gestures.js | 727 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
-| src/client/board-gestures.js | 786 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
-| src/client/board-gestures.js | 824 | sessionSlotAt | The place the hand is asking for, read off the grid. |
-| src/client/board-gestures.js | 870 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
-| src/client/board-gestures.js | 883 | resetSessionReorder | Put every column back where the paint left it. |
-| src/client/board-gestures.js | 909 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
-| src/client/board-gestures.js | 947 | beginSessionCarrier | Give a carried card its body, where the hand is. |
-| src/client/board-gestures.js | 987 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
-| src/client/board-gestures.js | 1108 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
-| src/client/board-gestures.js | 1388 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
-| src/client/board-gestures.js | 1444 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
-| src/client/board-gestures.js | 1454 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
-| src/client/board-gestures.js | 1500 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
-| src/client/board-gestures.js | 1515 | onBoardDoubleClick | A double click on the paper: write a card right there. |
+| src/client/board-gestures.js | 32 | beginNoteLift | Lift one put-away note out of the tray, under the hand. |
+| src/client/board-gestures.js | 82 | markDropGoal | Say which goal would take the card if the hand let go of it here. |
+| src/client/board-gestures.js | 101 | markDoneDrop | Light the finished strip a carried conversation would land in. |
+| src/client/board-gestures.js | 121 | markNoDrop | Say, under the hand, that the paper will not take this card. |
+| src/client/board-gestures.js | 147 | dropNoDropTip | Take the "the paper will not take it" line off the page. |
+| src/client/board-gestures.js | 164 | boardDragHasText | Whether a native drag carries words, the one thing the shell's rows set. |
+| src/client/board-gestures.js | 202 | sessionInPayload | The words a native drag is carrying, read where the browser allows it. |
+| src/client/board-gestures.js | 229 | boardDragText | } |
+| src/client/board-gestures.js | 247 | clearBoardDragGoal | Take the goal highlight a native drag drew off the paper. |
+| src/client/board-gestures.js | 264 | onNativeDragEnd | A native drag is over, however it ended. |
+| src/client/board-gestures.js | 278 | onBoardDragOver | Say, while a native drag is over the canvas, which goal would take it. |
+| src/client/board-gestures.js | 294 | onBoardDragLeave | The native drag left the canvas: take the goal highlight with it. |
+| src/client/board-gestures.js | 314 | onBoardDrop | A conversation let go on the canvas, carried in from the host's sidebar. |
+| src/client/board-gestures.js | 341 | dropSessionOntoBoard | Take one conversation the reader dragged in, and keep it. |
+| src/client/board-gestures.js | 377 | handleOf | A press on a block's heading: the handle the panel is dragged by. |
+| src/client/board-gestures.js | 406 | beginStackedCarrier | Lift one card out of a conversation's column, where the hand is. |
+| src/client/board-gestures.js | 445 | stackCardBefore | The card a drop should sit above, from where the pointer let go. |
+| src/client/board-gestures.js | 459 | paintStackDrop | } |
+| src/client/board-gestures.js | 477 | paintHeadDrop | Light the heading of the goal a carried card would start a conversation in. |
+| src/client/board-gestures.js | 498 | boardPointerDown | The one press handler on the canvas. |
+| src/client/board-gestures.js | 640 | showDropZones | } |
+| src/client/board-gestures.js | 655 | boardListen | Start listening for the rest of a gesture, once it has been armed. |
+| src/client/board-gestures.js | 672 | beginSessionGrab | Start a session drag: a sort inside its own panel, a carry outside it. |
+| src/client/board-gestures.js | 690 | panelHolds | Whether a hand is still close enough to its panel to be sorting inside it. |
+| src/client/board-gestures.js | 708 | beginSessionReorder | Sort one conversation among its neighbours, where the hand is. |
+| src/client/board-gestures.js | 767 | paintSessionReorder | Follow the hand, and let the other columns make room as it passes them. |
+| src/client/board-gestures.js | 805 | sessionSlotAt | The place the hand is asking for, read off the grid. |
+| src/client/board-gestures.js | 851 | leaveSessionReorder | Hand the drag back to the carrier, because the pointer left the panel. |
+| src/client/board-gestures.js | 864 | resetSessionReorder | Put every column back where the paint left it. |
+| src/client/board-gestures.js | 890 | commitSessionReorder | Write the order the hand chose, once, and draw it. |
+| src/client/board-gestures.js | 928 | beginSessionCarrier | Give a carried card its body, where the hand is. |
+| src/client/board-gestures.js | 968 | onBoardMove | Follow the pointer: pan the paper, or carry what the hand picked up. |
+| src/client/board-gestures.js | 1089 | onBoardUp | Let go: write down what the gesture decided, unless it never moved. |
+| src/client/board-gestures.js | 1369 | drawCardLinks | Draw the elbow from every branch back to the conversation it was cut from. |
+| src/client/board-gestures.js | 1425 | cancelBoardDrag | Drop the gesture and put back what it was carrying. |
+| src/client/board-gestures.js | 1435 | endBoardDrag | Take the gesture's furniture off the page and forget it. |
+| src/client/board-gestures.js | 1481 | onBoardBlurDrag | The window losing focus mid-gesture: the pointer left with it. |
+| src/client/board-gestures.js | 1496 | onBoardDoubleClick | A double click on the paper: write a card right there. |
 | src/client/board-history.js | 40 | readMoment | The page the board last drew, as it was left, or null. |
 | src/client/board-history.js | 54 | forgetMoment | Forget the page that was left, once it has been filed. |
 | src/client/board-history.js | 78 | noteMoment | Remember the page this repaint draws. |
@@ -174,18 +173,18 @@
 | src/client/board-notes.js | 215 | revealBoardCard | Bring one card into view, without moving the paper any further than it |
 | src/client/board-notes.js | 238 | watchForks | Watch the sessions service for forks, so a branch made anywhere in the |
 | src/client/board-notes.js | 277 | addBoardGoal | Stand a new goal on the canvas, ready to be given a purpose. |
-| src/client/board-pages.js | 31 | BoardPage | The board as the main panel's page. |
-| src/client/board-pages.js | 66 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
-| src/client/board-pages.js | 111 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
-| src/client/board-pages.js | 175 | overviewToday | What today did, as the overview reads it. |
-| src/client/board-pages.js | 268 | overviewFigure | One figure: the number, and what it counts, read as one block. |
-| src/client/board-pages.js | 286 | overviewNumber | One number in the table: how it reads depends on what it counts. |
-| src/client/board-pages.js | 295 | overviewHeading | One heading of the table, in the same columns as its rows. |
-| src/client/board-pages.js | 313 | mountOverviewInto | Build the overview into an element the host owns. |
-| src/client/board-pages.js | 445 | OverviewPage | The overview as the main panel's page. |
-| src/client/board-pages.js | 481 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
-| src/client/board-pages.js | 527 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
-| src/client/board-pages.js | 584 | installWindowCSS | The rules every window this plugin mounts shares, once. |
+| src/client/board-pages.js | 32 | BoardPage | The board as the main panel's page. |
+| src/client/board-pages.js | 67 | BoardPanelIcon | The sidebar entry's glyph: three columns, which is what the board is. |
+| src/client/board-pages.js | 112 | installBoardPage | Contribute the board as a sidebar entry and a main panel. |
+| src/client/board-pages.js | 176 | overviewToday | What today did, as the overview reads it. |
+| src/client/board-pages.js | 269 | overviewFigure | One figure: the number, and what it counts, read as one block. |
+| src/client/board-pages.js | 287 | overviewNumber | One number in the table: how it reads depends on what it counts. |
+| src/client/board-pages.js | 296 | overviewHeading | One heading of the table, in the same columns as its rows. |
+| src/client/board-pages.js | 314 | mountOverviewInto | Build the overview into an element the host owns. |
+| src/client/board-pages.js | 446 | OverviewPage | The overview as the main panel's page. |
+| src/client/board-pages.js | 482 | OverviewPanelIcon | The sidebar entry's glyph: three bars of a day, rising to the right. |
+| src/client/board-pages.js | 528 | installOverviewPage | Contribute the overview as a page of its own, beside the board. |
+| src/client/board-pages.js | 585 | installWindowCSS | The rules every window this plugin mounts shares, once. |
 | src/client/board-sheet.js | 27 | closeNewSessionSheet | Take the new-conversation sheet down, and forget what it was writing. |
 | src/client/board-sheet.js | 52 | paintNewSessionBusy | Put the sheet's confirm button in step with the one host round trip. |
 | src/client/board-sheet.js | 68 | paintNewSessionModel | Say which model the sheet would start the conversation on. |
@@ -198,6 +197,7 @@
 | src/client/board-sheet.js | 432 | fail | var sessionId = '' |
 | src/client/board-state.js | 291 | boardTitleOf | The name one card wears: the reader's word while the shell catches up, |
 | src/client/board-state.js | 314 | boardFieldOpen | Repaint the whole canvas from the feeds. |
+| src/client/board-state.js | 351 | raiseBoardCard | Bring one card to the front of the paper. |
 | src/client/board-stores.js | 50 | reportStoreFull | Say that the board could not be written, once. |
 | src/client/board-stores.js | 57 | makeBoardStore | } |
 | src/client/board-stores.js | 78 | seed | A board with nothing on it: no places, no cards, no marks. |

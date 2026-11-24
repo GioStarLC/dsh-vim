@@ -4,13 +4,14 @@
  * and the reading of today behind the overview. Also the one stylesheet
  * every window this plugin mounts shares.
  */
+import React from 'react'
 import { BOARD_MIN_FONT, BOARD_PANEL_ID, NS, OVERVIEW_PANEL_ID } from './constants.js'
 import { boardShowBoard } from './board-hooks.js'
 import { BOARD_STORE } from './board-stores.js'
 import { BOARD_PAGE_UI, BOARD_UI, OVERVIEW_UI, applyBoardPageInk } from './board-css.js'
 import { mountBoardInto, unmountBoard } from './board-mount.js'
 import { goalOfRow } from './board-canvas.js'
-import { boardTitleOf } from './board-state.js'
+import { BOARD, boardTitleOf } from './board-state.js'
 import { dayOf, startOfToday } from './time.js'
 import { conversationPool, folderIndex } from './sessions.js'
 import { settings } from './preferences.js'

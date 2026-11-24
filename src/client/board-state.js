@@ -337,5 +337,25 @@ function boardFieldOpen() {
   return false
 }
 
+/**
+ * Bring one card to the front of the paper.
+ *
+ * Cards overlap as soon as one is pulled out of its goal, and a pile is
+ * only readable if the card being worked on is the one on top. The press
+ * raises it, and the repaint remembers which card that was, so a repaint
+ * does not put it back under the others.
+ * @param {string} id - session id or card id.
+ * @param {Element} node - its element, when there is one already.
+ * @returns {void}
+ */
+function raiseBoardCard(id, node) {
+  if (!id) return
+  BOARD.zTop = BOARD.zTop + 1
+  BOARD.front = id
+  if (!node) return
+  node.setAttribute('data-front', 'true')
+  node.style.zIndex = String(BOARD.zTop)
+}
 
-export { BOARD, boardFieldOpen, boardTitleOf }
+
+export { BOARD, boardFieldOpen, boardTitleOf, raiseBoardCard }
